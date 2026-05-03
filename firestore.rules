@@ -1,0 +1,120 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Resource Specific Helpers ---
+
+    function isValidKnowledge(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.content is string && data.content.size() <= 100000 &&
+             data.sourceType in ['document', 'feedback', 'market_report', 'word', 'ppt', 'excel', 'pdf'] &&
+             data.category in ['strategy', 'competitor', 'industry', 'product'] &&
+             data.ownerId == request.auth.uid &&
+             (data.get('tags', []) is list) &&
+             data.get('tags', []).size() <= 20;
+    }
+
+    function isValidClient(data) {
+      return data.name is string && data.name.size() <= 100 &&
+             data.company is string && data.company.size() <= 100 &&
+             data.ownerId == request.auth.uid &&
+             data.stage in ['phase_0', 'phase_1', 'phase_2', 'phase_3', 'phase_4', 'phase_5', 'phase_6', 'phase_7'] &&
+             (data.get('industry', '') is string) && (data.get('industry', '').size() <= 100) &&
+             (data.get('memorySummary', '') is string) && (data.get('memorySummary', '').size() <= 10000) &&
+             (data.get('promoter', '') is string) &&
+             (data.get('keyPerson', '') is string) &&
+             (data.get('groupMeeting', '') is string) &&
+             (data.get('product', '') is string) &&
+             (data.get('scale', '') is string) &&
+             (data.get('projectScore', 0) is number) &&
+             (data.get('resistancePoint', '') is string) &&
+             (data.get('missingMaterials', '') is string) &&
+             (data.get('progress', '') is string) &&
+             (data.get('nextActionSuggestion', '') is string) &&
+             (data.get('nextActionCompleted', false) is bool);
+    }
+
+    function isValidInteraction(data) {
+      return data.type in ['chat', 'email', 'meeting', 'call', 'note'] &&
+             data.content is string && data.content.size() <= 50000 &&
+             data.authorId == request.auth.uid;
+    }
+
+    function isValidContentAsset(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.type in ['PPT', 'Report', 'Strategy', 'Prompt', 'Journey'] &&
+             data.body is string && data.body.size() <= 100000 &&
+             data.ownerId == request.auth.uid;
+    }
+
+    // --- Rules ---
+
+    match /knowledge/{knowledgeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(knowledgeId) && isValidKnowledge(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(knowledgeId) && isValidKnowledge(incoming()) && 
+                       incoming().updatedAt == request.time &&
+                       incoming().createdAt == existing().createdAt;
+    }
+
+    match /clients/{clientId} {
+      allow get: if isSignedIn() && isValidId(clientId) && isOwner(existing().ownerId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      allow create: if isSignedIn() && 
+                       isValidId(clientId) && 
+                       isValidClient(incoming()) && 
+                       incoming().createdAt == request.time && 
+                       incoming().updatedAt == request.time;
+      
+      allow update: if isOwner(existing().ownerId) && 
+                       isValidClient(incoming()) && 
+                       incoming().updatedAt == request.time &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt;
+
+      match /interactions/{interactionId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId);
+        allow create: if isSignedIn() && 
+                         isValidId(interactionId) &&
+                         isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
+                         isValidInteraction(incoming()) && 
+                         incoming().timestamp == request.time;
+      }
+
+      match /content/{contentId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId);
+        allow create: if isSignedIn() && 
+                         isValidId(contentId) &&
+                         isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
+                         isValidContentAsset(incoming()) && 
+                         incoming().createdAt == request.time;
+      }
+    }
+  }
+}

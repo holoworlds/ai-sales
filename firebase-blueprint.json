@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "KnowledgeEntry": {
+      "title": "Knowledge Entry",
+      "description": "A piece of industry or product knowledge learned by the AI.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "sourceType": { "type": "string", "enum": ["document", "feedback", "market_report", "word", "ppt", "excel", "pdf"] },
+        "category": { "type": "string", "enum": ["strategy", "competitor", "industry", "product"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "sourceType", "category", "ownerId"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "A B2B client or prospect profile.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "industry": { "type": "string" },
+        "stage": { "type": "string", "enum": ["phase_0", "phase_1", "phase_2", "phase_3", "phase_4", "phase_5", "phase_6", "phase_7"] },
+        "memorySummary": { "type": "string" },
+        "nextActionDate": { "type": "string", "format": "date-time" },
+        "nextActionSuggestion": { "type": "string" },
+        "nextActionCompleted": { "type": "boolean" },
+        "promoter": { "type": "string" },
+        "keyPerson": { "type": "string" },
+        "groupMeeting": { "type": "string" },
+        "product": { "type": "string" },
+        "scale": { "type": "string" },
+        "projectScore": { "type": "number" },
+        "resistancePoint": { "type": "string" },
+        "missingMaterials": { "type": "string" },
+        "progress": { "type": "string" },
+        "decisionMatrix": { "type": "object" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "company", "ownerId"]
+    },
+    "Interaction": {
+      "title": "Interaction",
+      "description": "A log of an interaction with a client, including AI-generated replies.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["chat", "email", "meeting", "call"] },
+        "content": { "type": "string" },
+        "aiReplySuggestion": { "type": "string" },
+        "feedback": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["type", "content", "authorId", "timestamp"]
+    },
+    "ContentAsset": {
+      "title": "Content Asset",
+      "description": "Marketing materials generated for a specific client.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["PPT", "Report", "Strategy", "Prompt", "Journey"] },
+        "body": { "type": "string" },
+        "promptConfig": { "type": "object" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "type", "body", "ownerId"]
+    }
+  },
+  "firestore": {
+    "/knowledge/{knowledgeId}": {
+      "schema": "KnowledgeEntry",
+      "description": "Global or organization-wide knowledge base."
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Client management."
+    },
+    "/clients/{clientId}/interactions/{interactionId}": {
+      "schema": "Interaction",
+      "description": "Interaction history for a client."
+    },
+    "/clients/{clientId}/content/{contentId}": {
+      "schema": "ContentAsset",
+      "description": "Generated assets for a client."
+    }
+  }
+}

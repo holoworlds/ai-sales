@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Resource Specific Helpers ---
+
+    function isValidKnowledge(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.content is string && data.content.size() <= 50000 &&
+             data.sourceType in ['document', 'feedback', 'market_report'] &&
+             (data.get('tags', []) is list);
+    }
+
+    function isValidClient(data) {
+      return data.name is string && data.name.size() <= 100 &&
+             data.company is string && data.company.size() <= 100 &&
+             data.ownerId == request.auth.uid &&
+             data.stage in ['lead', 'contacted', 'proposal', 'negotiation', 'closed_won', 'closed_lost'] &&
+             (data.get('memorySummary', '') is string);
+    }
+
+    function isValidInteraction(data) {
+      return data.type in ['chat', 'email', 'meeting', 'call'] &&
+             data.content is string && data.content.size() <= 10000 &&
+             data.authorId == request.auth.uid;
+    }
+
+    function isValidContentAsset(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.type in ['PPT', 'Report', 'Strategy', 'Prompt'] &&
+             data.body is string && data.body.size() <= 50000 &&
+             data.ownerId == request.auth.uid;
+    }
+
+    // --- Rules ---
+
+    match /knowledge/{knowledgeId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(knowledgeId) && isValidKnowledge(incoming());
+    }
+
+    match /clients/{clientId} {
+      allow get: if isValidId(clientId) && isOwner(existing().ownerId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(clientId) && isValidClient(incoming()) && incoming().createdAt == request.time;
+      
+      allow update: if isValidId(clientId) && isOwner(existing().ownerId) && isValidClient(incoming()) && (
+        // Action: Generic Edit
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'company', 'industry', 'stage', 'memorySummary', 'updatedAt']) &&
+        incoming().updatedAt == request.time &&
+        incoming().createdAt == existing().createdAt
+      );
+
+      // Sub-collections
+      match /interactions/{interactionId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId);
+        allow create: if isValidId(interactionId) && 
+                         isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
+                         isValidInteraction(incoming()) && incoming().timestamp == request.time;
+      }
+
+      match /content/{contentId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId);
+        allow create: if isValidId(contentId) && 
+                         isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
+                         isValidContentAsset(incoming()) && incoming().createdAt == request.time;
+      }
+    }
+  }
+}

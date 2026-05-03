@@ -1,0 +1,9 @@
+{
+  "name": "AI B2B Marketing Pro",
+  "description": "An intelligent B2B marketing consultant that automates knowledge learning, client relationship management, and real-time content generation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
