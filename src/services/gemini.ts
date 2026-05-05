@@ -168,36 +168,62 @@ export const consultClientStrategy = async (discussion: string, clientContext: s
   return JSON.parse(response.text || "{}");
 };
 
-export const generateClientJourney = async (product: string, hotTopics: string, clientContext: string) => {
-  const model = "gemini-2.0-flash"; // Using a faster model for journey synthesis
+export const generateIntegratedStrategicInsight = async (
+  product: { name: string, industry: string, coreValue: string, targetUser: string, usageScenario: string },
+  customerMessage: string
+) => {
+  const model = "gemini-2.0-flash";
   const prompt = `
-    你是一个顶级的 B2B 战略销售教练。请基于以下上下文，为销售团队合成一份“认知共感旅程 (GEO - Generative Engine Optimization)”方案。
-    
-    【核心逻辑指南】
-    系统目标：通过自动化客户状态模拟，将客户从 Phase 0 逐步推向 Phase 2。
-    
-    1. Phase 0：现状惯性 (Status Quo - 客户未意识到问题)
-       - 状态：业务照旧，未感知变革，对新技术或方案陌生。关键问题：“为什么要变？”
-       - 战术：行业趋势分析、紧迫性风险提示、白皮书/成功案例。
-    2. Phase 1：认知觉醒 (Awareness - 感知变化但未关联自身)
-       - 状态：注意到行业变化，但在问“这和我有关吗？”
-       - 战术：行业对比分析、定制化诊断、引发关联性痛点。
-    3. Phase 2：问题归属 (Problem Ownership - 意识到问题但无责任人)
-       - 状态：识别到问题，但缺乏行动方案或责任分配。关键问题：“这是不是我们的问题？”
-       - 战术：痛点量化案例、明确下一步行动计划、推动建立内部责任人 (Champion)。
- 
-    用户输入上下文：
-    - 推广产品/价值: ${product}
-    - 客户背景及互动历史: ${clientContext}
-    - 当前行业热点/客户担忧: ${hotTopics}
- 
-    【任务】
-    1. 模拟客户当前最可能的认知阶段 (Phase 0, 1, 或 2)。
-    2. 生成总体的战术导图摘要。
-    3. 针对每个阶段 (Phase 0, 1, 2) 分别给出具体的：核心策略、建议话术(Scripts)、推荐的辅助内容。
-    4. 识别并提取该进程中的成功信号与风险信号。
- 
-    请严格按照返回模式中的 JSON 格式输出。
+    你是一个顶级的 B2B 战略销售专家。你的任务是基于产品信息和客户的一句话，同时执行两个核心分析任务：
+    1. 实时对话决策：判断客户当前状态（1-7），识别意图，并给出最佳策略和话术。
+    2. 全局旅途预测：基于产品属性和行业，自动推演该客户从“状态1”到“状态7”的完整推进路径。
+
+    【产品信息】
+    产品名称：${product.name}
+    所属行业：${product.industry}
+    核心价值：${product.coreValue}
+    目标用户：${product.targetUser}
+    使用场景：${product.usageScenario}
+
+    【客户信息】
+    客户发言："${customerMessage}"
+
+    【状态体系定义（严格遵守）】
+    状态1：未认知 (未感知变化或紧迫性)
+    状态2：已认知 (听说过，但未关联到自身业务价值)
+    状态3：问题探索 (怀疑可控性，想知道怎么确保结果)
+    状态4：约束阻塞 (由于合规、风险、资源等因素产生焦虑)
+    状态5：价值认可 (场景具体化，代入产品后的认同)
+    状态6：行动准备 (寻找低风险路径，询问具体方案/试点)
+    状态7：决策阶段 (ROI 评估，比较价格、案例，准备签约)
+
+    【任务要求】
+    - 请严格按照以下输出数据结构返回。
+    - 针对“完整客户旅途”，必须覆盖状态1到状态7的每一个阶段。
+    - 对于“当前判断”，请基于客户发言进行精准的状态定性。
+
+    输出 JSON 结构：
+    {
+      "currentAnalysis": {
+        "stage": "状态X",
+        "intent": "理解客户这句话背后的潜台词",
+        "objective": "当前阶段最核心的推进目标",
+        "strategy": "针对此话术的回应策略",
+        "suggestedScript": "具体的建议回复话术"
+      },
+      "fullJourney": [
+        {
+          "stage": "状态1",
+          "definingTraits": "该阶段客户的典型特征",
+          "possibleQuotes": ["客户可能说的话1", "客户可能说的话2"],
+          "psychology": "该阶段客户的内心戏/潜意识",
+          "objective": "你的推进目标",
+          "strategy": "应对策略",
+          "suggestedScript": "针对性示例话术"
+        },
+        ... (状态2到状态7)
+      ]
+    }
   `;
 
   const response = await ai.models.generateContent({
@@ -208,25 +234,35 @@ export const generateClientJourney = async (product: string, hotTopics: string, 
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          currentSimulatedStage: { type: Type.STRING, enum: ["Phase 0", "Phase 1", "Phase 2"] },
-          summary: { type: Type.STRING, description: "总体战术导图摘要" },
-          journeySteps: {
+          currentAnalysis: {
+            type: Type.OBJECT,
+            properties: {
+              stage: { type: Type.STRING },
+              intent: { type: Type.STRING },
+              objective: { type: Type.STRING },
+              strategy: { type: Type.STRING },
+              suggestedScript: { type: Type.STRING }
+            },
+            required: ["stage", "intent", "objective", "strategy", "suggestedScript"]
+          },
+          fullJourney: {
             type: Type.ARRAY,
             items: {
               type: Type.OBJECT,
               properties: {
-                step: { type: Type.STRING },
+                stage: { type: Type.STRING },
+                definingTraits: { type: Type.STRING },
+                possibleQuotes: { type: Type.ARRAY, items: { type: Type.STRING } },
+                psychology: { type: Type.STRING },
+                objective: { type: Type.STRING },
                 strategy: { type: Type.STRING },
-                scripts: { type: Type.STRING },
-                recommendedContent: { type: Type.STRING, description: "建议投喂的文档/报告类型" }
+                suggestedScript: { type: Type.STRING }
               },
-              required: ["step", "strategy", "scripts", "recommendedContent"]
+              required: ["stage", "possibleQuotes", "psychology", "objective", "strategy", "suggestedScript"]
             }
-          },
-          successSignals: { type: Type.ARRAY, items: { type: Type.STRING } },
-          riskSignals: { type: Type.ARRAY, items: { type: Type.STRING } }
+          }
         },
-        required: ["currentSimulatedStage", "summary", "journeySteps", "successSignals", "riskSignals"]
+        required: ["currentAnalysis", "fullJourney"]
       }
     }
   });
@@ -474,4 +510,61 @@ export const evolveAgentCapability = async (
   });
 
   return JSON.parse(response.text || "{}");
+};
+
+export const generateClientJourney = async (product: string, hotTopics: string, clientContext: string) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `
+    你是一个顶级的 B2B 战略销售教练。请基于以下上下文，为销售团队合成一份“认知演进旅程 (1-7阶段)”方案。
+    
+    【核心逻辑指南】
+    状态1：未认知 (未感知变化或紧迫性)
+    状态2：已认知 (听说过，但未关联到自身业务价值)
+    状态3：问题探索 (怀疑可控性，想知道怎么确保结果)
+    状态4：约束阻塞 (由于合规、风险、资源等因素产生焦虑)
+    状态5：价值认可 (场景具体化，代入产品后的认同)
+    状态6：行动准备 (寻找低风险路径，询问具体方案/试点)
+    状态7：决策阶段 (ROI 评估，比较价格、案例，准备签约)
+
+    用户输入上下文：
+    - 推广产品/价值: ${product}
+    - 客户背景及互动历史: ${clientContext}
+    - 当前行业热点/客户担忧: ${hotTopics}
+ 
+    【任务】
+    1. 生成总体的战术导图摘要。
+    2. 针对每个阶段 (1-7) 分别给出具体的：阶段名称(step)、核心策略(strategy)、建议话术(scripts)、推荐内容(recommendedContent)。
+ 
+    请严格按照返回模式中的 JSON 格式输出。
+  `;
+
+  const resp = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING },
+          journeySteps: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                step: { type: Type.STRING },
+                strategy: { type: Type.STRING },
+                scripts: { type: Type.STRING },
+                recommendedContent: { type: Type.STRING }
+              },
+              required: ["step", "strategy", "scripts", "recommendedContent"]
+            }
+          }
+        },
+        required: ["summary", "journeySteps"]
+      }
+    }
+  });
+
+  return JSON.parse(resp.text || "{}");
 };
