@@ -4,7 +4,7 @@ export { Type };
 export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const generateMarketingReply = async (conversation: string, clientContext: string) => {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Based on the following conversation and client context, generate a high-quality response to advance the B2B partnership.
     
@@ -26,7 +26,7 @@ export const generateMarketingReply = async (conversation: string, clientContext
 };
 
 export const generateContentAsset = async (type: string, clientInfo: string, requirements: string) => {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Generate a B2B marketing ${type} based on the following client information and requirements.
     
@@ -45,7 +45,7 @@ export const generateContentAsset = async (type: string, clientInfo: string, req
 };
 
 export const analyzeClientStage = async (interactions: string) => {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     你是一个资深的B2B大客户销售专家和战略顾问。请根据以下客户互动内容（聊天、会议纪要等），分析该客户当前处于哪个决策阶段（Phase 0-7）。
     
@@ -90,9 +90,33 @@ export const analyzeClientStage = async (interactions: string) => {
           },
           nextActionSuggestion: { type: Type.STRING },
           recommendedFollowupDays: { type: Type.NUMBER },
-          reasoning: { type: Type.STRING }
+          reasoning: { type: Type.STRING },
+          extractedFields: {
+            type: Type.OBJECT,
+            properties: {
+              promoter: { type: Type.STRING },
+              promoterDept: { type: Type.STRING },
+              keyPerson: { type: Type.STRING },
+              groupMeeting: { type: Type.STRING },
+              interestedProducts: { type: Type.STRING },
+              budgetScale: { type: Type.STRING },
+              resistancePoint: { type: Type.STRING },
+              missingMaterials: { type: Type.STRING },
+              progress: { type: Type.STRING }
+            }
+          },
+          scoreDetails: {
+            type: Type.OBJECT,
+            properties: {
+              strategicValue: { type: Type.NUMBER, description: "Max 40. 评估产品阶段、疾病复杂度、组织成熟度等" },
+              feasibility: { type: Type.NUMBER, description: "Max 40. 评估客户温度、内部推动人、预算、决策路径" },
+              progress: { type: Type.NUMBER, description: "Max 20. 评估当前阶段、关系深度" },
+              total: { type: Type.NUMBER },
+              breakdown: { type: Type.OBJECT, description: "详细项得分映射" }
+            }
+          }
         },
-        required: ["stage", "bottlenecks", "suggestions", "matrix", "nextActionSuggestion", "recommendedFollowupDays"]
+        required: ["stage", "bottlenecks", "suggestions", "matrix", "nextActionSuggestion", "recommendedFollowupDays", "scoreDetails"]
       }
     }
   });
@@ -101,7 +125,7 @@ export const analyzeClientStage = async (interactions: string) => {
 };
 
 export const consultClientStrategy = async (discussion: string, clientContext: string) => {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     你是一个顶级的B2B销售教练（Sales Coach）。用户正在向你咨询关于某个具体客户的策略。
     
@@ -145,7 +169,7 @@ export const consultClientStrategy = async (discussion: string, clientContext: s
 };
 
 export const generateClientJourney = async (product: string, hotTopics: string, clientContext: string) => {
-  const model = "gemini-1.5-flash"; // Using a faster model for journey synthesis
+  const model = "gemini-2.0-flash"; // Using a faster model for journey synthesis
   const prompt = `
     你是一个顶级的 B2B 战略销售教练。请基于以下上下文，为销售团队合成一份“认知共感旅程 (GEO - Generative Engine Optimization)”方案。
     
@@ -210,8 +234,39 @@ export const generateClientJourney = async (product: string, hotTopics: string, 
   return JSON.parse(response.text || "{}");
 };
 
+export const getStrategicAdvice = async (query: string, context: { clients: string, knowledge: string }) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `你是一个顶级战略副总裁和销售教练。你的任务是根据提供的实时上下文，回答用户的战略咨询。
+  
+  【已知事实：当前客户状态】
+  ${context.clients}
+  
+  【已知事实：知识库摘要】
+  ${context.knowledge}
+  
+  【用户指令】
+  ${query}
+  
+  【要求】
+  1. 必须基于已知的客户和知识库事实。
+  2. 自动分析并识别出当前最急需处理的节点。
+  3. 提供具体的“下一步行动建议”。
+  4. 保持敏锐、实战、且极其专业。
+  5. 以 JSON 格式返回，包含：{"analysis": "深度分析", "recommendations": ["建议1", "建议2"], "priorityClient": "最值得关注的客户(如有)", "fullResponse": "完整的对话文本"}`;
+
+  const result = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  return JSON.parse(result.text || "{}");
+};
+
 export const queryKnowledgeBase = async (query: string, context: string) => {
-  const model = "gemini-1.5-flash";
+  const model = "gemini-2.0-flash";
   const prompt = `你是一个基于内部知识库的战略助手。
   
   【任务指令】
@@ -236,14 +291,14 @@ export const queryKnowledgeBase = async (query: string, context: string) => {
 };
 
 export const extractKnowledgeInsights = async (content: string) => {
-  const model = "gemini-1.5-flash";
+  const model = "gemini-2.0-flash";
   const prompt = `你是一个顶级行业分析师。请分析并提炼以下内容的核心洞察。
   返回格式为JSON: 
   { 
     "suggestedTitle": "简短有力的标题", 
     "summary": "提炼的内容摘要", 
     "tags": ["标签1", "标签2"],
-    "category": "strategy/competitor/industry/product 选其一" 
+    "category": "strategy/competitor/industry/product/customer_case 选其一" 
   }
   内容: ${content}`;
 
@@ -258,10 +313,163 @@ export const extractKnowledgeInsights = async (content: string) => {
           suggestedTitle: { type: Type.STRING },
           summary: { type: Type.STRING },
           tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-          category: { type: Type.STRING, enum: ["strategy", "competitor", "industry", "product"] }
+          category: { type: Type.STRING, enum: ["strategy", "competitor", "industry", "product", "customer_case"] }
         },
         required: ["suggestedTitle", "summary", "tags", "category"]
       }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const performStrategicAgentReasoning = async (
+  queryText: string, 
+  context: { clients: any[], knowledge: any[], skills: any[] }
+) => {
+  const model = "gemini-2.0-flash";
+  
+  const prompt = `
+    你是一个集成了记忆系统、认知模型和能力系统的“认知型Agent系统”。
+    
+    【Layer 1: 记忆系统 (Memory System)】
+    当前客户画像与状态 (Clients): 
+    ${JSON.stringify(context.clients.map(c => ({ id: c.id, company: c.company, stage: c.stage, memorySummary: c.memorySummary })))}
+    
+    【Layer 2: 知识库 (Knowledge Base)】
+    摘要: ${JSON.stringify(context.knowledge.map(k => ({ title: k.title, category: k.category })))}
+    
+    【Layer 4: 能力系统 (Skill System)】
+    可用Skills: ${JSON.stringify(context.skills.map(s => ({ name: s.name, type: s.type, description: s.description })))}
+    
+    【用户指令】
+    ${queryText}
+    
+    【决策流程要求】
+    1. 识别客户：确定用户是指向特定客户还是全盘战略。
+    2. 认知判断：基于Phase 0-7模型判断相关客户当前的真实阶段。
+    3. 卡点分析：识别阻碍客户进入下一阶段的卡点。
+    4. Skill匹配：从Layer 4中选择最合适的Skills组合。
+    5. 执行建议：生成高质量的互动话术或行动建议。
+    
+    请严格返回如下 JSON 格式：
+    {
+      "analysis": "深度认知分析",
+      "decision": "核心决策逻辑说明",
+      "recommendedAction": "具体的下一步行动建议",
+      "generatedMessage": "建议发送给客户的消息/邮件内容（如有必要）",
+      "usedSkills": ["命中的Skill名称1", "命中的Skill名称2"],
+      "confidence": 0.8,
+      "suggestedSystemAction": {
+        "type": "CREATE_CLIENT | UPDATE_CLIENT | ADD_KNOWLEDGE",
+        "data": { 
+          "id": "如果为更新操作，必须包含对应的 ID",
+          "company": "新公司名称",
+          "stage": "phase_1",
+          "phaseDescription": "为什么判定处于该阶段的详细理由",
+          "memorySummary": "项目背景摘要",
+          "interestedProducts": "感兴趣的产品（如：AI平台、算力中心）",
+          "promotingDepartment": "内部推动部门（如：信息科、战略部）",
+          "projectScore": 85,
+          "budgetScale": "预算规模（如：50-100w，仅Phase 4及以后必填）"
+        },
+        "reasoning": "为什么要执行此操作"
+      }
+    }
+    
+    【特别注意】
+    1. 如果你发现用户提到一个新联系人或新公司，请建议 CREATE_CLIENT。
+    2. 如果你发现已有项目的阶段发生了变化（例如完成了一次会议或收到反馈），请建议 UPDATE_CLIENT 并包含该项目的 ID。
+    3. 对于 CREATE_CLIENT/UPDATE_CLIENT，请务必尝试从互动内容中“自动读取并确认”：感兴趣的产品、推动部门、项目评分（1-100，基于客户质量评价模型：需求匹配度、决策链完整度、预算可能性等）。
+    4. 进入到 Phase 4 (Solution Framing) 后，必须尝试识别并填写“预算规模”。
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const evaluateEvolutionProposal = async (userInput: { name: string, description: string, goal: string }) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `
+    你是一个高级系统架构师和认知引擎专家。
+    用户手动提出了一个系统“进化提案”（Evolution Proposal）。
+    
+    你的任务是：
+    1. 学习用户的意图（name, description, goal）。
+    2. 评价该提案是否符合当前“战略认知系统”的需求。
+    3. 如果提案不完整（缺失逻辑、缺失边界条件），请根据你的认知进行“补全”。
+    4. 如果提案完全没用或存在严重冲突，可以拒绝，但优先尝试补全。
+
+    用户输入:
+    名称: ${userInput.name}
+    描述: ${userInput.description}
+    目标: ${userInput.goal}
+
+    请严格返回如下 JSON 结构:
+    {
+        "isAccepted": boolean,
+        "evaluation": "评价内容 (由系统对用户输入进行评估的结果)",
+        "refinedProposal": {
+            "suggestedSkillName": "补全后的名称",
+            "suggestedSkillDescription": "补全后的详细描述",
+            "suggestedSkillLogic": "补全后的逻辑标识符（英文下划线格式，如: industry_compliance_check）",
+            "problem": "该能力解决的具体痛点",
+            "missingCapability": "该能力弥补的系统空缺"
+        },
+        "tags": ["特征标签1", "补全标签"]
+    }
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const evolveAgentCapability = async (
+  performanceLogs: any[],
+  currentSkills: any[]
+) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `
+    你是一个 Agent 系统改进引擎 (Evolution Engine)。
+    请分析以下性能日志和现有技能，识别系统能力缺口。
+    
+    【历史性能日志 (Layer 6: Feedback System)】
+    ${JSON.stringify(performanceLogs)}
+    
+    【当前所有技能 (Layer 4: Skill System)】
+    ${JSON.stringify(currentSkills.map(s => ({ name: s.name, description: s.description })))}
+    
+    // 省略部分 prompt 描述
+    请严格返回如下 JSON 格式：
+    {
+      "problem": "观察到的核心问题",
+      "rootCause": "深度根因分析",
+      "missingCapability": "系统缺失的具体能力描述",
+      "suggestedSkillName": "建议新增的Skill名称",
+      "suggestedSkillDescription": "该Skill的详细功能描述",
+      "suggestedSkillLogic": "该Skill内部应该使用的 prompt 逻辑参考"
+    }
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
     }
   });
 

@@ -12,21 +12,35 @@ import {
   ChevronRight,
   Sparkles,
   Search,
-  Bell
+  Bell,
+  Cpu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
+import StrategicAdvisor from './components/StrategicAdvisor';
 import ClientManager from './components/ClientManager';
 import KnowledgeBase from './components/KnowledgeBase';
 import JourneyGenerator from './components/JourneyGenerator';
 
-type View = 'dashboard' | 'clients' | 'knowledge' | 'journey';
+type View = 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    const handleError = (error: ErrorEvent) => {
+      console.error('App Runtime Error:', error);
+      setHasError(true);
+    };
+
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -95,6 +109,7 @@ export default function App() {
           </p>
 
           <button 
+            id="google-login-btn"
             onClick={loginWithGoogle}
             className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white py-4 rounded-2xl font-bold text-sm tracking-wide hover:bg-blue-700 transition-all group shadow-lg shadow-blue-100"
           >
@@ -114,8 +129,25 @@ export default function App() {
     );
   }
 
+  if (hasError) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
+        <X className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold mb-2">系统遇到一个关键性错误</h2>
+        <p className="text-gray-500 mb-6 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs"
+        >
+          尝试重新激活
+        </button>
+      </div>
+    );
+  }
+
   const navItems = [
     { id: 'dashboard', label: '控制中心', icon: LayoutDashboard },
+    { id: 'agent', label: '认知演进', icon: Cpu },
     { id: 'clients', label: '客户资产', icon: Users },
     { id: 'journey', label: '认知旅程', icon: Sparkles },
     { id: 'knowledge', label: '智能知识库', icon: BookOpen },
@@ -214,7 +246,7 @@ export default function App() {
         </header>
 
         {/* View Content */}
-        <div className="flex-1 overflow-auto p-8 lg:p-10">
+        <div className="flex-1 overflow-auto p-4 lg:p-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -224,8 +256,24 @@ export default function App() {
               transition={{ duration: 0.3 }}
               className="h-full"
             >
-              {currentView === 'dashboard' && <Dashboard setCurrentView={setCurrentView} />}
-              {currentView === 'clients' && <ClientManager />}
+              {currentView === 'dashboard' && (
+                <Dashboard 
+                  setCurrentView={setCurrentView} 
+                  setSelectedClientId={setSelectedClientId} 
+                />
+              )}
+              {currentView === 'agent' && (
+                <StrategicAdvisor 
+                  setCurrentView={setCurrentView} 
+                  setSelectedClientId={setSelectedClientId} 
+                />
+              )}
+              {currentView === 'clients' && (
+                <ClientManager 
+                  initialClientId={selectedClientId} 
+                  onClientClear={() => setSelectedClientId(null)} 
+                />
+              )}
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'journey' && <JourneyGenerator />}
             </motion.div>

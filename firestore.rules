@@ -44,6 +44,7 @@ service cloud.firestore {
              data.company is string && data.company.size() <= 100 &&
              data.ownerId == request.auth.uid &&
              data.stage in ['phase_0', 'phase_1', 'phase_2', 'phase_3', 'phase_4', 'phase_5', 'phase_6', 'phase_7'] &&
+             (data.get('phaseDescription', '') is string) && (data.get('phaseDescription', '').size() <= 1000) &&
              (data.get('industry', '') is string) && (data.get('industry', '').size() <= 100) &&
              (data.get('memorySummary', '') is string) && (data.get('memorySummary', '').size() <= 10000) &&
              (data.get('promoter', '') is string) &&
@@ -72,7 +73,44 @@ service cloud.firestore {
              data.ownerId == request.auth.uid;
     }
 
+    function isValidSkill(data) {
+      return data.name is string && data.name.size() <= 100 &&
+             data.type in ['analysis', 'generation', 'strategy'] &&
+             data.logic is string &&
+             data.ownerId == request.auth.uid;
+    }
+
+    function isValidAgentLog(data) {
+      return data.query is string &&
+             data.response is map &&
+             data.ownerId == request.auth.uid;
+    }
+
+    function isValidEvolutionProposal(data) {
+      return data.problem is string &&
+             data.status in ['pending', 'approved', 'rejected', 'implemented'] &&
+             data.ownerId == request.auth.uid;
+    }
+
     // --- Rules ---
+
+    match /skills/{skillId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidSkill(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(existing().ownerId) && isValidSkill(incoming());
+      allow delete: if isOwner(existing().ownerId);
+    }
+
+    match /agent_logs/{logId} {
+      allow read: if isOwner(existing().ownerId);
+      allow create: if isSignedIn() && isValidAgentLog(incoming()) && incoming().timestamp == request.time;
+    }
+
+    match /evolution_proposals/{proposalId} {
+      allow read: if isOwner(existing().ownerId);
+      allow create: if isSignedIn() && isValidEvolutionProposal(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(existing().ownerId) && isValidEvolutionProposal(incoming());
+    }
 
     match /knowledge/{knowledgeId} {
       allow read: if isSignedIn();

@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Target,
   CheckCircle2,
+  X,
   Archive,
   ChevronRight,
   ShieldAlert,
@@ -133,6 +134,17 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
         decisionMatrix: result.matrix,
         nextActionSuggestion: result.nextActionSuggestion,
         nextActionDate: nextDate,
+        projectScore: result.scoreDetails.total,
+        scoreDetails: result.scoreDetails,
+        promoter: result.extractedFields?.promoter || client.promoter,
+        promoterDept: result.extractedFields?.promoterDept || client.promoterDept,
+        keyPerson: result.extractedFields?.keyPerson || client.keyPerson,
+        groupMeeting: result.extractedFields?.groupMeeting || client.groupMeeting,
+        interestedProducts: result.extractedFields?.interestedProducts || client.interestedProducts,
+        budgetScale: result.extractedFields?.budgetScale || client.budgetScale,
+        resistancePoint: result.extractedFields?.resistancePoint || client.resistancePoint,
+        missingMaterials: result.extractedFields?.missingMaterials || client.missingMaterials,
+        progress: result.extractedFields?.progress || client.progress,
         updatedAt: serverTimestamp()
       });
     } catch (err) {
@@ -268,7 +280,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
                {analyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4 text-blue-600" />}
                <span className="text-xs font-black uppercase tracking-widest text-[#1A1C1E]">同步战略审计</span>
             </div>
-            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter group-hover:text-blue-500 transition-colors">基于全量互动生成下一步建议</span>
+            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter group-hover:text-blue-500 transition-colors">基于全量互动同步得分与档案</span>
           </button>
         </div>
       </header>
@@ -381,7 +393,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
                          <span className="text-xs font-bold uppercase px-4 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 shadow-sm">已执行</span>
                        )}
                      </div>
-                     <div className={`text-lg font-semibold leading-[1.8] mb-12 flex-1 ${client.nextActionCompleted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                     <div className={`text-lg font-semibold leading-[1.8] mb-12 flex-1 overflow-y-auto max-h-[500px] pr-4 custom-scrollbar ${client.nextActionCompleted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                        <div className="prose-p:mb-4">
                          <ReactMarkdown>{client.nextActionSuggestion}</ReactMarkdown>
                        </div>
@@ -396,21 +408,24 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
                               {client.nextActionDate?.toDate ? client.nextActionDate.toDate().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }) : '待定'}
                            </div>
                         </div>
-                        {!client.nextActionCompleted && (
-                          <button 
-                            onClick={async () => {
-                              try {
-                                await updateDoc(doc(db, 'clients', client.id), {
-                                  nextActionCompleted: true,
-                                  updatedAt: serverTimestamp()
-                                });
-                              } catch (err) { console.error(err); }
-                            }}
-                            className="flex items-center gap-3 px-8 py-4.5 bg-emerald-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-[0_15px_30px_-5px_rgba(16,185,129,0.3)] active:scale-95"
-                          >
-                            <CheckCircle2 className="w-5 h-5" /> 确认已执行
-                          </button>
-                        )}
+                        <button 
+                          onClick={async () => {
+                            try {
+                              await updateDoc(doc(db, 'clients', client.id), {
+                                nextActionCompleted: !client.nextActionCompleted,
+                                updatedAt: serverTimestamp()
+                              });
+                            } catch (err) { console.error(err); }
+                          }}
+                          className={`flex items-center gap-3 px-8 py-4.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 ${
+                            client.nextActionCompleted 
+                              ? 'bg-gray-100 text-gray-400 hover:bg-gray-200 shadow-none' 
+                              : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20'
+                          }`}
+                        >
+                          <CheckCircle2 className={`w-5 h-5 ${client.nextActionCompleted ? 'text-emerald-500' : 'text-white'}`} /> 
+                          {client.nextActionCompleted ? '已完成 - 点击撤回' : '确认已完成'}
+                        </button>
                      </div>
                   </div>
                 )}
@@ -595,6 +610,130 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                 {/* Tactical Status Cards */}
                 <div className="xl:col-span-2 space-y-8">
+                  {/* Project Rating Model Card */}
+                  <div className="bg-white border border-gray-200 rounded-[3rem] p-10 shadow-sm relative overflow-hidden">
+                    <div className="flex flex-col lg:flex-row gap-12">
+                      <div className="flex flex-col items-center justify-center border-r border-gray-100 pr-12 lg:min-w-[200px]">
+                         <div className="relative w-32 h-32 flex items-center justify-center">
+                            <svg className="w-full h-full transform -rotate-90">
+                              <circle
+                                cx="64"
+                                cy="64"
+                                r="58"
+                                stroke="currentColor"
+                                strokeWidth="8"
+                                fill="transparent"
+                                className="text-gray-50"
+                              />
+                              <circle
+                                cx="64"
+                                cy="64"
+                                r="58"
+                                stroke="currentColor"
+                                strokeWidth="8"
+                                fill="transparent"
+                                strokeDasharray={364.4}
+                                strokeDashoffset={364.4 - (364.4 * (client.projectScore || 0)) / 100}
+                                className={`${
+                                  (client.projectScore || 0) >= 75 ? 'text-emerald-500' :
+                                  (client.projectScore || 0) >= 55 ? 'text-blue-500' :
+                                  (client.projectScore || 0) >= 35 ? 'text-amber-500' : 'text-red-500'
+                                } transition-all duration-1000 ease-out`}
+                              />
+                            </svg>
+                            <div className="absolute flex flex-col items-center">
+                              <span className="text-4xl font-black tracking-tighter text-gray-900">{client.projectScore || 0}</span>
+                              <span className="text-[10px] font-bold text-gray-400 uppercase">/ 100</span>
+                            </div>
+                         </div>
+                         <div className={`mt-6 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] whitespace-nowrap ${
+                            (client.projectScore || 0) >= 75 ? 'bg-emerald-500 text-white' :
+                            (client.projectScore || 0) >= 55 ? 'bg-blue-500 text-white' :
+                            (client.projectScore || 0) >= 35 ? 'bg-amber-500 text-white' : 'bg-red-500 text-white'
+                         }`}>
+                            {(client.projectScore || 0) >= 75 ? 'A级 深耕重点' :
+                             (client.projectScore || 0) >= 55 ? 'B级 培养+观察' :
+                             (client.projectScore || 0) >= 35 ? 'C级 轻触达' : 'D级 低维护'}
+                         </div>
+                      </div>
+
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-8 py-4">
+                         <div className="space-y-4">
+                            <div className="flex justify-between items-end">
+                               <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">战略价值</span>
+                               <span className="text-sm font-bold text-gray-900">{client.scoreDetails?.strategicValue || 0}/40</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+                               <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${((client.scoreDetails?.strategicValue || 0) / 40) * 100}%` }}
+                                  className="h-full bg-blue-600 rounded-full"
+                               />
+                            </div>
+                            <p className="text-[9px] text-gray-400 leading-relaxed">评估产品阶段、疾病复杂度、组织成熟度及增长压力。</p>
+                         </div>
+
+                         <div className="space-y-4">
+                            <div className="flex justify-between items-end">
+                               <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">成交可行性</span>
+                               <span className="text-sm font-bold text-gray-900">{client.scoreDetails?.feasibility || 0}/40</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+                               <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${((client.scoreDetails?.feasibility || 0) / 40) * 100}%` }}
+                                  className="h-full bg-emerald-500 rounded-full"
+                               />
+                            </div>
+                            <p className="text-[9px] text-gray-400 leading-relaxed">评估目前客户温度、内部Champion、预算及决策路径。</p>
+                         </div>
+
+                         <div className="space-y-4">
+                            <div className="flex justify-between items-end">
+                               <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">推进状态</span>
+                               <span className="text-sm font-bold text-gray-900">{client.scoreDetails?.progress || 0}/20</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+                               <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${((client.scoreDetails?.progress || 0) / 20) * 100}%` }}
+                                  className="h-full bg-purple-500 rounded-full"
+                               />
+                            </div>
+                            <p className="text-[9px] text-gray-400 leading-relaxed">根据当前所处 Phase 及关系深度综合判定。</p>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* New Project Profile Fields */}
+                  <div className="bg-white border border-gray-200 rounded-[3rem] p-10 shadow-sm relative overflow-hidden">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-16 -mt-16 opacity-30" />
+                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-600 mb-8 flex items-center gap-2">
+                        <Archive className="w-4 h-4" /> 扩展项目画像
+                     </h3>
+                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-10">
+                        <div>
+                           <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 block">感兴趣的产品</label>
+                           <div className="text-sm font-bold text-gray-900">{client.interestedProducts || '待确认'}</div>
+                        </div>
+                        <div>
+                           <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 block">推动部门</label>
+                           <div className="text-sm font-bold text-gray-900">{client.promoterDept || '待确认'}</div>
+                        </div>
+                        <div>
+                           <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 block">主要推动人 / Champion</label>
+                           <div className="text-sm font-bold text-gray-900">{client.promoter || '待识别'}</div>
+                        </div>
+                        {(client.stage === 'phase_4' || client.stage === 'phase_5' || client.stage === 'phase_6' || client.stage === 'phase_7') && (
+                           <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
+                              <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 block">预算规模 (PHASE 4+)</label>
+                              <div className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg w-fit border border-emerald-100">{client.budgetScale || '需评估'}</div>
+                           </motion.div>
+                        )}
+                     </div>
+                  </div>
+
                   {/* Phase Overview */}
                   <div className="bg-white border border-gray-200 rounded-[3rem] p-10 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-48 h-48 bg-blue-50 rounded-bl-full -mr-16 -mt-16 opacity-50" />
@@ -874,7 +1013,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">更新基础数据与决策认知阶段</p>
                  </div>
                  <button onClick={() => setIsEditing(false)} className="p-3 hover:bg-gray-200 rounded-full transition-colors text-gray-400">
-                    <CheckCircle2 className="w-6 h-6" />
+                    <X className="w-6 h-6" />
                  </button>
               </div>
 
@@ -947,6 +1086,50 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
                           className="w-full bg-gray-50 border border-gray-100 px-6 py-4 rounded-2xl focus:bg-white focus:border-blue-600 outline-none transition-all shadow-inner"
                        />
                     </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                       <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest px-1">推动部门</label>
+                       <input 
+                          type="text" 
+                          value={editForm.promoterDept || ''} 
+                          onChange={e => setEditForm({ ...editForm, promoterDept: e.target.value })}
+                          className="w-full bg-gray-50 border border-gray-100 px-6 py-4 rounded-2xl focus:bg-white focus:border-blue-600 outline-none transition-all shadow-inner"
+                       />
+                    </div>
+                    <div className="space-y-4">
+                       <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest px-1">感兴趣的产品</label>
+                       <input 
+                          type="text" 
+                          value={editForm.interestedProducts || ''} 
+                          onChange={e => setEditForm({ ...editForm, interestedProducts: e.target.value })}
+                          className="w-full bg-gray-50 border border-gray-100 px-6 py-4 rounded-2xl focus:bg-white focus:border-blue-600 outline-none transition-all shadow-inner"
+                       />
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                       <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest px-1">项目评分</label>
+                       <input 
+                          type="number" 
+                          value={editForm.projectScore || 0} 
+                          onChange={e => setEditForm({ ...editForm, projectScore: Number(e.target.value) })}
+                          className="w-full bg-gray-50 border border-gray-100 px-6 py-4 rounded-2xl focus:bg-white focus:border-blue-600 outline-none transition-all shadow-inner"
+                       />
+                    </div>
+                    {(editForm.stage === 'phase_4' || editForm.stage === 'phase_5' || editForm.stage === 'phase_6' || editForm.stage === 'phase_7') && (
+                       <div className="space-y-4">
+                          <label className="text-[10px] font-black uppercase text-emerald-600 tracking-widest px-1">预算规模 (PHASE 4+)</label>
+                          <input 
+                             type="text" 
+                             value={editForm.budgetScale || ''} 
+                             onChange={e => setEditForm({ ...editForm, budgetScale: e.target.value })}
+                             className="w-full bg-emerald-50/50 border border-emerald-100 px-6 py-4 rounded-2xl focus:bg-white focus:border-emerald-600 outline-none transition-all shadow-inner"
+                          />
+                       </div>
+                    )}
                  </div>
 
                  <div className="space-y-4">

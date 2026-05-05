@@ -3,6 +3,7 @@ import { db, auth } from '../services/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Client } from '../types';
 import { motion } from 'motion/react';
+import StrategicAdvisor from './StrategicAdvisor';
 import { 
   Users, 
   TrendingUp, 
@@ -12,32 +13,45 @@ import {
   Sparkles,
   ArrowRight,
   CheckCircle2,
-  Clock
+  Clock,
+  Cpu,
+  Brain,
+  Workflow
 } from 'lucide-react';
 
 interface DashboardProps {
-  setCurrentView: (view: 'dashboard' | 'clients' | 'knowledge' | 'journey') => void;
+  setCurrentView: (view: 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey') => void;
+  setSelectedClientId: (id: string | null) => void;
 }
 
-export default function Dashboard({ setCurrentView }: DashboardProps) {
+export default function Dashboard({ setCurrentView, setSelectedClientId }: DashboardProps) {
   const [clients, setClients] = useState<Client[]>([]);
+  const [skillCount, setSkillCount] = useState(0);
+  const [proposalCount, setProposalCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!auth.currentUser) return;
+    const uid = auth.currentUser.uid;
 
-    const q = query(
-      collection(db, 'clients'),
-      where('ownerId', '==', auth.currentUser.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
-      setClients(data);
+    const unsubClients = onSnapshot(query(collection(db, 'clients'), where('ownerId', '==', uid)), (s) => {
+      setClients(s.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    const unsubSkills = onSnapshot(query(collection(db, 'skills'), where('ownerId', '==', uid)), (s) => {
+      setSkillCount(s.size);
+    });
+
+    const unsubProposals = onSnapshot(query(collection(db, 'evolution_proposals'), where('ownerId', '==', uid), where('status', '==', 'pending')), (s) => {
+      setProposalCount(s.size);
+    });
+
+    return () => {
+      unsubClients();
+      unsubSkills();
+      unsubProposals();
+    };
   }, []);
 
   const pendingActionsCount = clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).length;
@@ -94,6 +108,60 @@ export default function Dashboard({ setCurrentView }: DashboardProps) {
         ))}
       </div>
 
+      {/* Cognitive Agent Entry Card */}
+      <section>
+        <motion.div 
+           initial={{ opacity: 0, y: 20 }}
+           animate={{ opacity: 1, y: 0 }}
+           onClick={() => setCurrentView('agent')}
+           className="bg-[#1A1C1E] rounded-[2.5rem] p-8 border border-white/5 shadow-2xl relative overflow-hidden group cursor-pointer"
+        >
+           {/* Background Pulse Decor */}
+           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-600/5 rounded-full blur-[120px] pointer-events-none group-hover:bg-blue-600/10 transition-all duration-1000" />
+           
+           <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div className="flex items-center gap-8">
+                 <div className="relative">
+                    <div className="w-24 h-24 rounded-3xl bg-blue-600 flex items-center justify-center shadow-2xl shadow-blue-600/40 relative z-10">
+                       <Cpu className="w-10 h-10 text-white" />
+                    </div>
+                    <div className="absolute -inset-2 bg-blue-600/20 rounded-[2rem] animate-pulse" />
+                 </div>
+                 
+                 <div>
+                    <div className="flex items-center gap-3 mb-2">
+                       <h2 className="text-2xl font-bold text-white">认知型 Agent 决策中心</h2>
+                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] font-black uppercase tracking-[0.2em] rounded border border-blue-500/30">Active</span>
+                    </div>
+                    <p className="text-gray-400 text-sm max-w-md leading-relaxed">
+                       神经网络已连接 Layer 1 记忆系统。当前 Agent 拥有 <span className="text-white font-bold">{skillCount}</span> 个核心技能，发现 <span className="text-blue-400 font-bold">{proposalCount}</span> 个待处理进化提案。
+                    </p>
+                 </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                 <div className="hidden lg:flex items-center gap-8 px-8 border-x border-white/5">
+                    <div className="text-center">
+                       <div className="text-xs font-black text-gray-500 uppercase tracking-widest mb-1">进化水平</div>
+                       <div className="text-xl font-bold text-white flex items-center gap-2 justify-center">
+                          <Zap className="w-4 h-4 text-amber-500" />
+                          Lv.{(Math.floor(skillCount / 5) + 1)}
+                       </div>
+                    </div>
+                    <div className="text-center">
+                       <div className="text-xs font-black text-gray-500 uppercase tracking-widest mb-1">认知容量</div>
+                       <div className="text-xl font-bold text-white">98%</div>
+                    </div>
+                 </div>
+
+                 <button className="bg-white text-[#1A1C1E] px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 shadow-xl">
+                    进入深度推理 <ArrowRight className="w-4 h-4" />
+                 </button>
+              </div>
+           </div>
+        </motion.div>
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Quick Actions */}
         <section className="lg:col-span-2 space-y-6">
@@ -135,7 +203,10 @@ export default function Dashboard({ setCurrentView }: DashboardProps) {
             {clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).slice(0, 5).map((client) => (
               <div 
                 key={client.id} 
-                onClick={() => setCurrentView('clients')}
+                onClick={() => {
+                  setSelectedClientId(client.id);
+                  setCurrentView('clients');
+                }}
                 className="flex gap-4 items-start group cursor-pointer border-b border-gray-50 last:border-0 pb-6 last:pb-0"
               >
                 <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all">

@@ -27,11 +27,26 @@ import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import ClientDetails from './ClientDetails';
 
-export default function ClientManager() {
+interface ClientManagerProps {
+  initialClientId?: string | null;
+  onClientClear?: () => void;
+}
+
+export default function ClientManager({ initialClientId, onClientClear }: ClientManagerProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  // Handle initial client selection from dashboard
+  useEffect(() => {
+    if (initialClientId && clients.length > 0) {
+      const client = clients.find(c => c.id === initialClientId);
+      if (client) {
+        setSelectedClient(client);
+      }
+    }
+  }, [initialClientId, clients]);
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [newClient, setNewClient] = useState({ name: '', company: '', industry: '' });
@@ -48,16 +63,18 @@ export default function ClientManager() {
     const data = clients.map(c => ({
       '客户名称': c.company,
       '推动人': c.promoter || '',
+      '推动部门': c.promoterDept || '',
       '关键人（拍板/影响者）': c.keyPerson || '',
       '群体会议': c.groupMeeting || '',
-      '产品': c.product || '',
-      '规模': c.scale || '',
+      '产品': c.interestedProducts || c.product || '',
+      '预算规模': c.budgetScale || c.scale || '',
       '项目评分': c.projectScore || 0,
       '当前阶段': PHASE_MATRIX[c.stage]?.label || c.stage,
       '阻力点': c.resistancePoint || '',
       '缺什么材料': c.missingMaterials || '',
       '下一步行动建议': c.nextActionSuggestion || '',
-      '进展': c.progress || ''
+      '进展': c.progress || '',
+      '现状摘要': (c.memorySummary || '').slice(0, 100)
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -227,6 +244,16 @@ export default function ClientManager() {
         decisionMatrix: result.matrix,
         nextActionSuggestion: result.nextActionSuggestion,
         nextActionDate: nextDate,
+        projectScore: result.scoreDetails?.total || quickLogClient.projectScore,
+        promoter: result.extractedFields?.promoter || quickLogClient.promoter,
+        promoterDept: result.extractedFields?.promoterDept || quickLogClient.promoterDept,
+        keyPerson: result.extractedFields?.keyPerson || quickLogClient.keyPerson,
+        groupMeeting: result.extractedFields?.groupMeeting || quickLogClient.groupMeeting,
+        interestedProducts: result.extractedFields?.interestedProducts || quickLogClient.interestedProducts,
+        budgetScale: result.extractedFields?.budgetScale || quickLogClient.budgetScale,
+        resistancePoint: result.extractedFields?.resistancePoint || quickLogClient.resistancePoint,
+        missingMaterials: result.extractedFields?.missingMaterials || quickLogClient.missingMaterials,
+        progress: result.extractedFields?.progress || quickLogClient.progress,
         updatedAt: serverTimestamp()
       });
 
@@ -259,7 +286,15 @@ export default function ClientManager() {
   const phases = Object.keys(PHASE_MATRIX) as ClientStage[];
 
   if (selectedClient) {
-    return <ClientDetails client={selectedClient} onBack={() => setSelectedClient(null)} />;
+    return (
+      <ClientDetails 
+        client={selectedClient} 
+        onBack={() => {
+          setSelectedClient(null);
+          onClientClear?.();
+        }} 
+      />
+    );
   }
 
   return (
@@ -328,59 +363,68 @@ export default function ClientManager() {
              <div className="w-12 h-12 border-2 border-blue-600/20 border-t-blue-600 animate-spin rounded-full" />
           </div>
         ) : viewMode === 'list' ? (
-          <div className="bg-white border border-gray-200 rounded-[2.5rem] h-full flex flex-col shadow-sm overflow-hidden">
-             <div className="grid grid-cols-12 gap-4 px-10 py-5 border-b border-gray-100 bg-gray-50/50 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-               <div className="col-span-4">客户实体 / 决策者</div>
-               <div className="col-span-3">当前战略 Phase</div>
-               <div className="col-span-4">下一步行动</div>
-               <div className="col-span-1"></div>
-             </div>
-             <div className="flex-1 overflow-y-auto divide-y divide-gray-50 no-scrollbar">
-               {filteredClients.map(client => (
-                 <div 
-                   key={client.id}
-                   onClick={() => setSelectedClient(client)}
-                   className="grid grid-cols-12 gap-4 px-10 py-8 hover:bg-blue-50/25 cursor-pointer transition-all group items-center"
-                 >
-                   <div className="col-span-4 flex items-center gap-6">
-                     <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all font-black">
-                       {client.company.charAt(0)}
-                     </div>
-                     <div>
-                       <div className="font-bold text-base text-gray-900 leading-none mb-1">{client.company}</div>
-                       <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{client.name}</div>
-                     </div>
-                   </div>
-                   <div className="col-span-3">
-                     <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-100">
-                       {PHASE_MATRIX[client.stage]?.label}
-                     </span>
-                   </div>
-                   <div className="col-span-4">
-                      {client.nextActionSuggestion && (
-                        <div className="flex items-center justify-between gap-4">
-                           <div className={`flex items-start gap-2 flex-1 transition-opacity ${client.nextActionCompleted ? 'opacity-30' : 'opacity-100'}`}>
-                              <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                              <span className={`text-xs font-medium line-clamp-1 ${client.nextActionCompleted ? 'line-through' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
-                           </div>
-                           <button 
-                             onClick={(e) => handleToggleAction(e, client)}
-                             className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
-                               client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
-                             }`}
-                           >
-                             <CheckCircle2 className="w-3.5 h-3.5" />
-                           </button>
+          <>
+            <div className="grid grid-cols-12 gap-4 px-10 py-5 border-b border-gray-100 bg-gray-50/50 text-[10px] font-bold uppercase tracking-widest text-gray-400">
+              <div className="col-span-4">客户实体 / 决策者</div>
+              <div className="col-span-2 text-center">项目评分 / 等级</div>
+              <div className="col-span-2">当前战略 Phase</div>
+              <div className="col-span-3">下一步行动</div>
+              <div className="col-span-1"></div>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-50 no-scrollbar">
+              {filteredClients.map(client => (
+                <div 
+                  key={client.id}
+                  onClick={() => setSelectedClient(client)}
+                  className="grid grid-cols-12 gap-4 px-10 py-8 hover:bg-blue-50/25 cursor-pointer transition-all group items-center"
+                >
+                  <div className="col-span-4 flex items-center gap-6">
+                    <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all font-black">
+                      {client.company.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="font-bold text-base text-gray-900 leading-none mb-1">{client.company}</div>
+                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{client.name}</div>
+                    </div>
+                  </div>
+                  <div className="col-span-2 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className={`text-sm font-black ${(client.projectScore || 0) >= 75 ? 'text-emerald-500' : (client.projectScore || 0) >= 55 ? 'text-blue-500' : (client.projectScore || 0) >= 35 ? 'text-amber-500' : 'text-red-500'}`}>
+                        {client.projectScore || 0}
+                      </span>
+                      <span className="text-[8px] font-bold text-gray-400">{(client.projectScore || 0) >= 75 ? 'A级' : (client.projectScore || 0) >= 55 ? 'B级' : (client.projectScore || 0) >= 35 ? 'C级' : 'D级'}</span>
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-100">
+                      {PHASE_MATRIX[client.stage as keyof typeof PHASE_MATRIX]?.label || '未知阶段'}
+                    </span>
+                  </div>
+                  <div className="col-span-3">
+                    {client.nextActionSuggestion && (
+                      <div className="flex items-center justify-between gap-4">
+                        <div className={`flex items-start gap-2 flex-1 transition-opacity ${client.nextActionCompleted ? 'opacity-30' : 'opacity-100'}`}>
+                          <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                          <span className={`text-xs font-medium line-clamp-1 ${client.nextActionCompleted ? 'line-through' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
                         </div>
-                      )}
-                   </div>
-                   <div className="col-span-1 text-right">
-                     <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-blue-600 transition-colors inline-block" />
-                   </div>
-                 </div>
-               ))}
-             </div>
-          </div>
+                        <button 
+                          onClick={(e) => handleToggleAction(e, client)}
+                          className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                            client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="col-span-1 text-right">
+                    <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-blue-600 transition-colors inline-block" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <div className="flex gap-6 h-full overflow-x-auto pb-4 no-scrollbar">
             {phases.map(phase => {
@@ -392,14 +436,14 @@ export default function ClientManager() {
                   <div className={`p-4 rounded-t-[2rem] border-x border-t flex flex-col gap-2 ${isNurture ? 'bg-blue-50/50 border-blue-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
                     <div className="flex items-center justify-between">
                       <span className={`text-[10px] font-black uppercase tracking-widest ${isNurture ? 'text-blue-600' : 'text-emerald-600'}`}>
-                        {PHASE_MATRIX[phase].label}
+                        {PHASE_MATRIX[phase as keyof typeof PHASE_MATRIX]?.label || phase}
                       </span>
                       <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full border border-current opacity-50">
                         {phaseClients.length}
                       </span>
                     </div>
                     <div className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter truncate opacity-70">
-                      目标: {PHASE_MATRIX[phase].nextTarget}
+                      目标: {PHASE_MATRIX[phase as keyof typeof PHASE_MATRIX]?.nextTarget || '待定'}
                     </div>
                   </div>
                   
@@ -411,7 +455,16 @@ export default function ClientManager() {
                       >
                         <div className="flex items-start justify-between mb-4">
                            <div onClick={() => setSelectedClient(client)} className="flex-1">
-                              <h4 className="font-bold text-sm text-gray-900 group-hover:text-blue-600 transition-colors">{client.company}</h4>
+                              <div className="flex items-center gap-2 mb-1">
+                                 <h4 className="font-bold text-sm text-gray-900 group-hover:text-blue-600 transition-colors truncate">{client.company}</h4>
+                                 <span className={`text-[8px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${
+                                    (client.projectScore || 0) >= 75 ? 'bg-emerald-500' : 
+                                    (client.projectScore || 0) >= 55 ? 'bg-blue-500' : 
+                                    (client.projectScore || 0) >= 35 ? 'bg-amber-500' : 'bg-red-500'
+                                 }`}>
+                                    {(client.projectScore || 0) >= 75 ? 'A' : (client.projectScore || 0) >= 55 ? 'B' : (client.projectScore || 0) >= 35 ? 'C' : 'D'}
+                                 </span>
+                              </div>
                               <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{client.name}</p>
                            </div>
                            <button 
@@ -426,7 +479,7 @@ export default function ClientManager() {
                           <div className={`mt-4 pt-4 border-t border-gray-50 space-y-3 transition-opacity ${client.nextActionCompleted ? 'opacity-40' : 'opacity-100'}`}>
                              <div className="flex items-start gap-2.5">
                                 <BrainCircuit className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                                <span className={`text-[10px] leading-relaxed font-medium ${client.nextActionCompleted ? 'line-through text-gray-400' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
+                                <span className={`text-[10px] leading-relaxed font-medium line-clamp-3 ${client.nextActionCompleted ? 'line-through text-gray-400' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
                              </div>
                              <div className="flex items-center justify-between">
                                 <div className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest w-fit px-2 py-1 rounded-md ${

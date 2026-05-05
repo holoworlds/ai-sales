@@ -53,17 +53,21 @@ export default function JourneyGenerator() {
 
       // If a client is selected, also save to their assets
       if (selectedClient && auth.currentUser) {
+        const stepsBody = (journey.journeySteps || []).map((s: any) => 
+          `#### ${s.step || '步骤'}\n**策略:** ${s.strategy || '待定'}\n**建议话术:** \n> ${s.scripts || '无'}\n**推荐内容:** ${s.recommendedContent || '无'}\n`
+        ).join('\n---\n');
+
+        const successBody = (journey.successSignals || []).map((s: any) => `- ${s}`).join('\n');
+        const riskBody = (journey.riskSignals || []).map((s: any) => `- ${s}`).join('\n');
+
         await addDoc(collection(db, 'clients', selectedClient.id, 'content'), {
-          title: `GEO Cognitive Journey (${journey.currentSimulatedStage}) - ${new Date().toLocaleDateString()}`,
+          title: `GEO Cognitive Journey (${journey.currentSimulatedStage || 'Unknown'}) - ${new Date().toLocaleDateString()}`,
           type: 'Journey',
-          body: `### 模拟当前阶段: ${journey.currentSimulatedStage}\n\n` +
-                 `### 总体战术导图摘要\n${journey.summary}\n\n` + 
-                 `### 认知旅程核心步骤\n` +
-                 journey.journeySteps.map((s: any) => 
-                   `#### ${s.step}\n**策略:** ${s.strategy}\n**建议话术:** \n> ${s.scripts}\n**推荐内容:** ${s.recommendedContent}\n`
-                 ).join('\n---\n') +
-                 `\n### 成功信号\n` + journey.successSignals.map((s: any) => `- ${s}`).join('\n') +
-                 `\n### 风险信号\n` + journey.riskSignals.map((s: any) => `- ${s}`).join('\n'),
+          body: `### 模拟当前阶段: ${journey.currentSimulatedStage || '未知'}\n\n` +
+                 `### 总体战术导图摘要\n${journey.summary || '无摘要'}\n\n` + 
+                 `### 认知旅程核心步骤\n` + stepsBody +
+                 `\n### 成功信号\n` + successBody +
+                 `\n### 风险信号\n` + riskBody,
           ownerId: auth.currentUser.uid,
           createdAt: serverTimestamp(),
         });
@@ -220,32 +224,32 @@ export default function JourneyGenerator() {
                              <CheckCircle2 className="w-4 h-4" /> 成功信号 (推进迹象)
                           </h4>
                           <div className="space-y-3">
-                             {generatedJourney.successSignals.map((sig: string, i: number) => (
-                               <div key={i} className="flex gap-3 text-sm font-medium text-emerald-900 leading-relaxed">
-                                  <span className="text-emerald-300 select-none">•</span>
-                                  {sig}
-                               </div>
-                             ))}
-                          </div>
-                       </div>
-                       <div className="space-y-4 bg-amber-50/50 border border-amber-100 p-8 rounded-[2rem]">
-                          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 flex items-center gap-2 mb-2">
-                             <AlertTriangle className="w-4 h-4" /> 风险信号 (停滞警戒)
-                          </h4>
-                          <div className="space-y-3">
-                             {generatedJourney.riskSignals.map((sig: string, i: number) => (
-                               <div key={i} className="flex gap-3 text-sm font-medium text-amber-900 leading-relaxed">
-                                  <span className="text-amber-300 select-none">•</span>
-                                  {sig}
-                               </div>
-                             ))}
-                          </div>
+                           {(generatedJourney.successSignals || []).map((sig: string, i: number) => (
+                             <div key={i} className="flex gap-3 text-sm font-medium text-emerald-900 leading-relaxed">
+                                <span className="text-emerald-300 select-none">•</span>
+                                {sig}
+                             </div>
+                           ))}
+                        </div>
+                     </div>
+                     <div className="space-y-4 bg-amber-50/50 border border-amber-100 p-8 rounded-[2rem]">
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 flex items-center gap-2 mb-2">
+                           <AlertTriangle className="w-4 h-4" /> 风险信号 (停滞警戒)
+                        </h4>
+                        <div className="space-y-3">
+                           {(generatedJourney.riskSignals || []).map((sig: string, i: number) => (
+                             <div key={i} className="flex gap-3 text-sm font-medium text-amber-900 leading-relaxed">
+                                <span className="text-amber-300 select-none">•</span>
+                                {sig}
+                             </div>
+                           ))}
+                        </div>
                        </div>
                     </div>
 
                     <div className="space-y-10">
                        <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 text-center">三阶段进化路径 (Phase 0 ➔ Phase 2)</h4>
-                       {generatedJourney.journeySteps.map((step: any, idx: number) => (
+                       { (generatedJourney.journeySteps || []).map((step: any, idx: number) => (
                          <div key={idx} className="relative pl-12 border-l-2 border-gray-100 last:border-0 pb-12 last:pb-0">
                             <div className="absolute top-0 left-[-13px] w-6 h-6 bg-white border-2 border-blue-600 rounded-full flex items-center justify-center text-[10px] font-bold text-blue-600 z-10 shadow-sm shadow-blue-100">
                                {idx}

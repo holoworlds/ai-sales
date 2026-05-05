@@ -14,16 +14,26 @@ export interface Client {
   company: string;
   industry?: string;
   stage: ClientStage;
+  phaseDescription?: string;
   memorySummary?: string;
   nextActionDate?: any;
   nextActionSuggestion?: string;
   nextActionCompleted?: boolean;
   promoter?: string;
+  promoterDept?: string;
   keyPerson?: string;
   groupMeeting?: string;
+  interestedProducts?: string;
   product?: string;
+  budgetScale?: string;
   scale?: string;
   projectScore?: number;
+  scoreDetails?: {
+    strategicValue: number;
+    feasibility: number;
+    progress: number;
+    breakdown: Record<string, number>;
+  };
   resistancePoint?: string;
   missingMaterials?: string;
   progress?: string;
@@ -66,6 +76,56 @@ export interface KnowledgeEntry {
   content: string;
   sourceType: 'document' | 'feedback' | 'market_report' | 'word' | 'ppt' | 'excel' | 'pdf';
   tags: string[];
+  ownerId: string;
+  category: 'strategy' | 'competitor' | 'industry' | 'product' | 'customer_case';
   createdAt: any;
   updatedAt: any;
+}
+
+export interface AgentSkill {
+  id: string;
+  name: string;
+  type: 'analysis' | 'generation' | 'strategy';
+  description: string;
+  logic: string; // The prompt template or logic
+  performanceScore: number;
+  applicablePhases: ClientStage[];
+  usageCount: number;
+  ownerId: string;
+  createdAt: any;
+}
+
+export interface AgentInteraction {
+  id: string;
+  clientId?: string; // Optional if global
+  query: string;
+  response: {
+    analysis: string;
+    decision: string;
+    recommendedAction: string;
+    generatedMessage: string;
+    usedSkills: string[];
+    confidence: number;
+  };
+  feedback?: {
+    score: number; // -2 to +2
+    comment?: string;
+  };
+  timestamp: any;
+  ownerId: string;
+}
+
+export interface EvolutionProposal {
+  id: string;
+  problem: string;
+  rootCause: string;
+  missingCapability: string;
+  suggestedSkillName: string;
+  suggestedSkillDescription: string;
+  suggestedSkillLogic: string;
+  evaluation?: string;
+  isManual?: boolean;
+  status: 'pending' | 'approved' | 'rejected' | 'implemented';
+  ownerId: string;
+  createdAt: any;
 }

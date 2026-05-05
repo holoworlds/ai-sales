@@ -28,7 +28,8 @@ import {
   RefreshCw,
   MessageSquare,
   Send,
-  Loader2
+  Loader2,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -54,6 +55,7 @@ export default function KnowledgeBase() {
   const [qaResponse, setQaResponse] = useState('');
   const [isQuerying, setIsQuerying] = useState(false);
   const [qaHistory, setQaHistory] = useState<{ role: 'user' | 'ai', content: string }[]>([]);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -117,6 +119,7 @@ export default function KnowledgeBase() {
     { id: 'all', label: '全部知识', icon: Database },
     { id: 'strategy', label: '战略战术', icon: Zap },
     { id: 'competitor', label: '竞争情报', icon: FileSearch },
+    { id: 'customer_case', label: '客户案例', icon: Users },
     { id: 'industry', label: '行业洞察', icon: Activity },
     { id: 'product', label: '产品能力', icon: Layers },
   ];
@@ -161,6 +164,11 @@ export default function KnowledgeBase() {
             });
           }
           alert(`成功从 Excel 导入 ${rawData.length} 条知识点`);
+          setShowSuccess(true);
+          setTimeout(() => {
+            setShowSuccess(false);
+            setIsAdding(false);
+          }, 2000);
         } catch (err) {
           console.error(err);
           alert('Excel 解析失败');
@@ -195,7 +203,11 @@ export default function KnowledgeBase() {
         updatedAt: serverTimestamp(),
         ownerId: auth.currentUser?.uid
       });
-      setIsAdding(false);
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        setIsAdding(false);
+      }, 2000);
       setNewEntry({ title: '', content: '', sourceType: 'document', tags: '', category: 'strategy' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'knowledge');
@@ -414,7 +426,7 @@ export default function KnowledgeBase() {
         </div>
 
         {/* Intelligence Stats / Sidebar */}
-        <div className="hidden lg:flex flex-col gap-8">
+        <div className="hidden lg:flex flex-col gap-8 overflow-y-auto pr-2 no-scrollbar">
            <div className="bg-white border border-gray-200 p-10 rounded-[3rem] shadow-sm">
               <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8 flex items-center gap-3">
                 <Tag className="w-4 h-4 text-blue-600" />
@@ -538,7 +550,21 @@ export default function KnowledgeBase() {
                </div>
                
                <form onSubmit={handleAdd} className="p-12 space-y-8 overflow-y-auto no-scrollbar">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {showSuccess ? (
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="py-20 flex flex-col items-center justify-center text-center"
+                    >
+                      <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6">
+                        <FileCheck className="w-10 h-10" />
+                      </div>
+                      <h3 className="text-2xl font-bold text-gray-900 mb-2">提交成功</h3>
+                      <p className="text-gray-500">知识节点已同步至全球战略分层数据库</p>
+                    </motion.div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-3">
                       <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-1">集群标题</label>
                       <input 
@@ -624,6 +650,8 @@ export default function KnowledgeBase() {
                   >
                     确认提交节点至情报库
                   </button>
+                    </>
+                  )}
                </form>
             </motion.div>
           </div>

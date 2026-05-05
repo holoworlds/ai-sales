@@ -1,44 +1,13 @@
-# Security Specification - Cognitive GEO Sales Hub
+# Nexus AI Security Specification
 
-## Data Invariants
-1. **Client Ownership**: A client record can only be accessed or modified by its `ownerId`.
-2. **Sub-resource Integrity**: Interactions and Content Assets must belong to a valid Client, and access is inherited from the parent Client's ownership.
-3. **Stage Transitions**: Client stages must be one of the predefined `phase_0` to `phase_7` values.
-4. **Immutable Identity**: `ownerId` and `createdAt` cannot be changed after creation.
-5. **System Timestamps**: `updatedAt` (and `createdAt` on create) must match `request.time`.
+## 1. 数据安全性原则
+- **身份隔离**: 所有数据项必须包含 `ownerId`，且读写规则必须校验 `request.auth.uid == resource.data.ownerId`。
+- **不可篡改字段**: `createdAt` 在创建后禁止修改。
+- **系统保留字段**: `projectScore` 和 `stage` 的大幅变动应基于 AI 推理逻辑，避免手动批量注入脏数据。
 
-## The "Dirty Dozen" Payloads (Attacks)
+## 2. 字段级校验 (Data Invariants)
+- **Client**: `company` 不能为空，长度不超过 100 字符。
+- **Knowledge**: 必须属于 `strategy`, `competitor`, `customer_case`, `industry`, `product` 分类之一。
 
-1. **Identity Spoofing**: Attempt to create a client with an `ownerId` that doesn't match the authenticated user.
-2. **Ghost Field Injection**: Adding undocumented fields (e.g., ` isAdmin: true`) to a client update.
-3. **Stage Bypass**: Setting an invalid stage string (e.g., `phase_99`).
-4. **Cross-Tenant Access**: Attempting to `get` or `list` clients belonging to another user.
-5. **Privilege Escalation**: Attempting to change the `ownerId` of an existing client.
-6. **Interaction Orphan**: Creating an interaction for a client that the user does not own.
-7. **DoS (Large String)**: Sending a 1MB string into the `company` name field.
-8. **ID Poisoning**: Using a 1.5KB string as a document ID.
-9. **Timestamp Fraud**: Sending a client-side `updatedAt` timestamp that is in the past or future.
-10. **Resource Scraping**: Authenticated user trying to `list` all clients without a `where` clause on `ownerId`.
-11. **Knowledge Corruption**: Non-admin trying to update a knowledge entry with malicious content (Note: current app doesn't have explicit admin, so any signed-in user can add knowledge, but we restrict it to their own creator role if added).
-12. **Content Hijacking**: authenticated user trying to read a `ContentAsset` of a client they don't own by guessing the ID.
-
-## Test Runner (firestore.rules.test.ts)
-*Note: This is a conceptual representation of the test suite.*
-
-```typescript
-import { assertFails, assertSucceeds, ... } from '@firebase/rules-unit-testing';
-
-// Test Identity Spoofing
-it('should deny creating a client with different ownerId', async () => {
-  const db = getFirestore(auth('user_a'));
-  await assertFails(addDoc(collection(db, 'clients'), { company: 'X', ownerId: 'user_b' }));
-});
-
-// Test Cross-Tenant Access
-it('should deny reading another users client', async () => {
-  const db = getFirestore(auth('user_a'));
-  await assertFails(getDoc(doc(db, 'clients', 'client_of_user_b')));
-});
-
-// ... and so on for all 12 payloads
-```
+## 3. 审计日志
+- 所有的 `EvolutionProposal`（进化提案）审核状态必须记录在 `agent_logs` 中，不可物理删除。

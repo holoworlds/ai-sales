@@ -1,95 +1,86 @@
 {
   "entities": {
+    "Client": {
+      "title": "客户及项目资产",
+      "description": "存储客户基础信息、认知阶段 (Phase 0-7) 及决策分析数据",
+      "type": "object",
+      "properties": {
+        "company": { "type": "string" },
+        "stage": { "type": "string", "enum": ["phase_0", "phase_1", "phase_2", "phase_3", "phase_4", "phase_5", "phase_6", "phase_7"] },
+        "projectScore": { "type": "number" },
+        "nextActionSuggestion": { "type": "string" },
+        "nextActionCompleted": { "type": "boolean" },
+        "memorySummary": { "type": "string" },
+        "ownerId": { "type": "string" }
+      }
+    },
+    "Interaction": {
+      "title": "客户互动记录",
+      "description": "存储与客户的对话、会议、邮件等历史互动",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "type": { "type": "string", "enum": ["chat", "email", "meeting", "call"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      }
+    },
     "KnowledgeEntry": {
-      "title": "Knowledge Entry",
-      "description": "A piece of industry or product knowledge learned by the AI.",
+      "title": "智慧知识库",
+      "description": "存储行业洞察、竞争情报及战略战术",
       "type": "object",
       "properties": {
         "title": { "type": "string" },
         "content": { "type": "string" },
-        "sourceType": { "type": "string", "enum": ["document", "feedback", "market_report", "word", "ppt", "excel", "pdf"] },
-        "category": { "type": "string", "enum": ["strategy", "competitor", "industry", "product"] },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["title", "content", "sourceType", "category", "ownerId"]
+        "category": { "type": "string", "enum": ["strategy", "competitor", "industry", "product", "customer_case"] },
+        "ownerId": { "type": "string" }
+      }
     },
-    "Client": {
-      "title": "Client",
-      "description": "A B2B client or prospect profile.",
+    "AgentSkill": {
+      "title": "Agent 技能",
+      "description": "AI 认知的具象化逻辑模块",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "company": { "type": "string" },
-        "industry": { "type": "string" },
-        "stage": { "type": "string", "enum": ["phase_0", "phase_1", "phase_2", "phase_3", "phase_4", "phase_5", "phase_6", "phase_7"] },
-        "memorySummary": { "type": "string" },
-        "nextActionDate": { "type": "string", "format": "date-time" },
-        "nextActionSuggestion": { "type": "string" },
-        "nextActionCompleted": { "type": "boolean" },
-        "promoter": { "type": "string" },
-        "keyPerson": { "type": "string" },
-        "groupMeeting": { "type": "string" },
-        "product": { "type": "string" },
-        "scale": { "type": "string" },
-        "projectScore": { "type": "number" },
-        "resistancePoint": { "type": "string" },
-        "missingMaterials": { "type": "string" },
-        "progress": { "type": "string" },
-        "decisionMatrix": { "type": "object" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["name", "company", "ownerId"]
+        "type": { "type": "string", "enum": ["analysis", "generation", "strategy"] },
+        "logic": { "type": "string" },
+        "usageCount": { "type": "number" },
+        "ownerId": { "type": "string" }
+      }
     },
-    "Interaction": {
-      "title": "Interaction",
-      "description": "A log of an interaction with a client, including AI-generated replies.",
+    "EvolutionProposal": {
+      "title": "进化提案",
+      "description": "AI 自主发现的认知补丁或新技能建议",
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["chat", "email", "meeting", "call"] },
-        "content": { "type": "string" },
-        "aiReplySuggestion": { "type": "string" },
-        "feedback": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "authorId": { "type": "string" }
-      },
-      "required": ["type", "content", "authorId", "timestamp"]
-    },
-    "ContentAsset": {
-      "title": "Content Asset",
-      "description": "Marketing materials generated for a specific client.",
-      "type": "object",
-      "properties": {
-        "title": { "type": "string" },
-        "type": { "type": "string", "enum": ["PPT", "Report", "Strategy", "Prompt", "Journey"] },
-        "body": { "type": "string" },
-        "promptConfig": { "type": "object" },
-        "ownerId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["title", "type", "body", "ownerId"]
+        "problem": { "type": "string" },
+        "suggestedSkillName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "implemented"] },
+        "ownerId": { "type": "string" }
+      }
     }
   },
   "firestore": {
-    "/knowledge/{knowledgeId}": {
-      "schema": "KnowledgeEntry",
-      "description": "Global or organization-wide knowledge base."
-    },
-    "/clients/{clientId}": {
+    "/clients": {
       "schema": "Client",
-      "description": "Client management."
+      "description": "客户主集合"
     },
-    "/clients/{clientId}/interactions/{interactionId}": {
+    "/clients/{clientId}/interactions": {
       "schema": "Interaction",
-      "description": "Interaction history for a client."
+      "description": "客户互动子集合"
     },
-    "/clients/{clientId}/content/{contentId}": {
-      "schema": "ContentAsset",
-      "description": "Generated assets for a client."
+    "/knowledge": {
+      "schema": "KnowledgeEntry",
+      "description": "知识资产集合"
+    },
+    "/skills": {
+      "schema": "AgentSkill",
+      "description": "Agent 技能仓库"
+    },
+    "/evolution_proposals": {
+      "schema": "EvolutionProposal",
+      "description": "系统进化提案集合"
     }
   }
 }
