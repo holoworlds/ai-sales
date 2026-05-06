@@ -83,35 +83,6 @@ async function startServer() {
     res.status(204).end();
   });
 
-  // --- LLM Proxy ---
-  app.post('/api/llm/generate', async (req, res) => {
-    try {
-      const { prompt, modelId, systemInstruction, json, apiKey: userProvidedKey } = req.body;
-      const apiKey = userProvidedKey || process.env.GEMINI_API_KEY;
-
-      if (!apiKey) {
-        return res.status(400).json({ error: 'No API key provided. Please configure it in the environment or settings.' });
-      }
-
-      const { GoogleGenAI } = await import('@google/genai');
-      const genAI = new (GoogleGenAI as any)(apiKey);
-      const model = (genAI as any).getGenerativeModel({ 
-        model: modelId || 'gemini-2.0-flash',
-        systemInstruction
-      });
-
-      const result = await (model as any).generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: json ? { responseMimeType: "application/json" } : undefined
-      });
-
-      res.json({ text: result.response.text() });
-    } catch (err: any) {
-      console.error('LLM Proxy Error:', err);
-      res.status(500).json({ error: err.message || 'LLM Generation failed' });
-    }
-  });
-
   // --- Auth ---
   app.get('/api/auth/me', async (req, res) => {
      try {

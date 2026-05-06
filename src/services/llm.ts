@@ -1,4 +1,5 @@
 
+import { GoogleGenAI } from "@google/genai";
 import { localDb } from "./storage";
 import { LLMProvider, LLMConfig } from "../types";
 
@@ -12,9 +13,9 @@ const getActiveConfig = async (): Promise<LLMConfig | null> => {
   return {
     id: 'default-gemini',
     provider: LLMProvider.GOOGLE,
-    modelId: 'gemini-2.0-flash',
+    modelId: 'gemini-3-flash-preview',
     displayName: 'Gemini (System Default)',
-    apiKey: '', // Empty means use server default
+    apiKey: (process.env as any).GEMINI_API_KEY || '', 
     isPrimary: true,
     status: 'Active',
     createdAt: new Date().toISOString()
@@ -23,7 +24,7 @@ const getActiveConfig = async (): Promise<LLMConfig | null> => {
 
 export const getActiveModel = async () => {
     const config = await getActiveConfig();
-    return config ? config.modelId : "gemini-2.0-flash";
+    return config ? config.modelId : "gemini-3-flash-preview";
 };
 
 export const callLLM = async (prompt: string, options: { json?: boolean, systemInstruction?: string } = {}) => {
@@ -34,25 +35,24 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
   }
 
   if (config.provider === LLMProvider.GOOGLE) {
-    const response = await fetch('/api/llm/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        modelId: config.modelId,
-        systemInstruction: options.systemInstruction,
-        json: options.json,
-        apiKey: config.apiKey
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || 'LLM 请求失败');
+    const apiKey = config.apiKey || (process.env as any).GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('未找到有效的 Google Gemini API Key');
     }
 
-    const data = await response.json();
-    return data.text;
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // Use the correct pattern: ai.models.generateContent
+    const response = await ai.models.generateContent({
+      model: config.modelId || 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        systemInstruction: options.systemInstruction,
+        responseMimeType: options.json ? 'application/json' : undefined
+      }
+    });
+
+    return response.text;
   } else {
     // OpenAI Compatible APIs (OpenAI, Deepseek, Kimi, etc.)
     const baseUrl = config.baseUrl || 
