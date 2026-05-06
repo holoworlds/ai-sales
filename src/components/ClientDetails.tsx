@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Client, Interaction, ContentAsset, ClientStage } from '../types';
-import { generateMarketingReply, analyzeClientStage, generateContentAsset, consultClientStrategy, generateClientJourney } from '../services/gemini';
+import { generateMarketingReply, analyzeClientStage, generateContentAsset, consultClientStrategy, generateClientJourney, generateMeetingIntelligence } from '../services/gemini';
 import { PHASE_MATRIX } from '../constants';
 import { 
   ArrowLeft, 
@@ -26,7 +26,11 @@ import {
   Clock,
   MessageCircle,
   Map,
-  Zap
+  Zap,
+  BarChart3,
+  Users2,
+  ShieldCheck,
+  Briefcase
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -37,7 +41,7 @@ interface ClientDetailsProps {
 }
 
 export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
-  const [activeTab, setActiveTab] = useState<'interactions' | 'content' | 'analysis' | 'consult'>('interactions');
+  const [activeTab, setActiveTab] = useState<'interactions' | 'content' | 'analysis' | 'consult' | 'briefing'>('interactions');
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [contentAssets, setContentAssets] = useState<ContentAsset[]>([]);
   
@@ -60,10 +64,15 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const [editForm, setEditForm] = useState<Partial<Client>>({});
 
   // Content Gen Form
-  const [genType, setGenType] = useState<'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey'>('Strategy');
+  const [genType, setGenType] = useState<'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing'>('Strategy');
   const [genReqs, setGenReqs] = useState('');
   const [journeyHotTopics, setJourneyHotTopics] = useState('');
   const [generatingContent, setGeneratingContent] = useState(false);
+
+  // Briefing State
+  const [rawMeetingInput, setRawMeetingInput] = useState('');
+  const [generatingBriefing, setGeneratingBriefing] = useState(false);
+  const [briefingResult, setBriefingResult] = useState<any>(null);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -189,6 +198,72 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
     }
   };
 
+  const handleGenerateBriefing = async () => {
+    if (!rawMeetingInput.trim()) return;
+    setGeneratingBriefing(true);
+    try {
+      const result = await generateMeetingIntelligence(rawMeetingInput, {
+        clientName: client.company,
+        projectName: client.company, // Using company as project name for simple context
+        currentPhase: client.stage,
+        participants: [client.name]
+      });
+      setBriefingResult(result);
+
+      // Save as a permanent asset
+      const body = `
+### 3.1 一句话结论 (Summary)
+${result.summary}
+
+### 3.2 项目关键进展 (Key Updates)
+${result.keyUpdates.map((u: string) => `- ${u}`).join('\n')}
+
+### 3.3 风险识别 (Risks)
+${result.risks.map((r: any) => `- **${r.risk}**\n  → 影响：${r.impact}`).join('\n')}
+
+### 3.4 机会点 (Opportunities)
+${result.opportunities.map((o: string) => `- ${o}`).join('\n')}
+
+### 3.5 下一步行动 (Next Actions)
+${result.nextActions.map((a: any) => `- **${a.who}**: ${a.what} (${a.when})`).join('\n')}
+
+### 3.6 资源诉求 (Resource Requests)
+${result.resourceRequests.map((r: any) => `- **${r.resource}**\n  → 原因：${r.reason}`).join('\n')}
+
+### 3.7 战略意义 (Strategic Implication)
+${result.strategicImplication}
+
+---
+
+### Stakeholder Mapping (组织博弈)
+**当前格局:**
+${result.stakeholderMapping.currentLandscape.map((l: string) => `- ${l}`).join('\n')}
+
+${result.stakeholderMapping.competitorAnalysis ? `
+**对手情况 (${result.stakeholderMapping.competitorAnalysis.competitorName}):**
+- **优势:** ${result.stakeholderMapping.competitorAnalysis.theirStrengths.join(', ')}
+- **风险:** ${result.stakeholderMapping.competitorAnalysis.theirRisks.join(', ')}
+` : ''}
+
+### Winning Strategy (赢单策略)
+${result.winningStrategy}
+      `;
+
+      await addDoc(collection(db, 'clients', client.id, 'content'), {
+        title: `Meeting Intelligence & Progress - ${new Date().toLocaleDateString()}`,
+        type: 'Briefing',
+        body: body.trim(),
+        ownerId: auth.currentUser?.uid,
+        createdAt: serverTimestamp(),
+      });
+      
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setGeneratingBriefing(false);
+    }
+  };
+
   const handleConsult = async () => {
     if (!consultationText.trim()) return;
     const userMsg = consultationText;
@@ -290,6 +365,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
         <div className="flex bg-gray-50 p-1.5 rounded-2xl w-fit">
           {[
             { id: 'interactions', label: 'CRM与AI对话', icon: MessageSquare },
+            { id: 'briefing', label: '会议纪要/项目进展', icon: Briefcase },
             { id: 'consult', label: '战略咨询', icon: MessageCircle },
             { id: 'analysis', label: '战略阶段分析', icon: Target },
             { id: 'content', label: '资产实验室', icon: FileText },
@@ -313,6 +389,238 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
       {/* Content Area */}
       <div className="flex-1 overflow-hidden flex flex-col p-8 lg:p-10">
         <AnimatePresence mode="wait">
+          {activeTab === 'briefing' && (
+            <motion.div 
+               key="briefing"
+               initial={{ opacity: 0, y: 10 }}
+               animate={{ opacity: 1, y: 0 }}
+               exit={{ opacity: 0, y: 10 }}
+               className="flex-1 flex gap-10 h-full overflow-hidden"
+            >
+               <div className="flex-1 flex flex-col gap-8 h-full overflow-y-auto no-scrollbar pb-10">
+                  <section className="bg-white border border-gray-200 rounded-[2.5rem] p-10 shadow-sm space-y-8">
+                     <div className="flex items-center justify-between px-2">
+                        <div className="flex items-center gap-4">
+                           <div className="w-10 h-10 bg-[#1A1C1E] rounded-xl flex items-center justify-center shadow-lg">
+                              <Briefcase className="w-5 h-5 text-blue-400" />
+                           </div>
+                           <div>
+                              <h2 className="text-xl font-bold tracking-tight text-[#1A1C1E]">会议情报 & 项目结构化</h2>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">服务“推进决策”的自动化引擎</p>
+                           </div>
+                        </div>
+                     </div>
+
+                     <div className="space-y-4">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-2 flex items-center gap-2">
+                           <MessageSquare className="w-3 h-3" /> 原始对话 / 语音转写 / 笔记
+                        </label>
+                        <textarea 
+                           value={rawMeetingInput}
+                           onChange={e => setRawMeetingInput(e.target.value)}
+                           placeholder="在此粘贴会议原始录音文本或碎片化沟通笔记..."
+                           className="w-full h-48 bg-gray-50 border border-gray-100 rounded-3xl p-8 text-sm focus:bg-white focus:border-blue-600 outline-none transition-all resize-none shadow-inner"
+                        />
+                     </div>
+
+                     <button 
+                        onClick={handleGenerateBriefing}
+                        disabled={generatingBriefing || !rawMeetingInput.trim()}
+                        className="w-full py-7 bg-[#1A1C1E] text-white rounded-[2rem] font-black text-sm uppercase tracking-[0.4em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50"
+                     >
+                        {generatingBriefing ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Sparkles className="w-6 h-6" />}
+                        启动结构化分析并入库
+                     </button>
+                  </section>
+
+                  <AnimatePresence>
+                    {briefingResult && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-8"
+                      >
+                         {/* One Line Summary */}
+                         <div className="bg-blue-600 text-white rounded-[2.5rem] p-10 shadow-2xl shadow-blue-500/20 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-bl-full -mr-16 -mt-16" />
+                            <label className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-200 mb-4 block flex items-center gap-2">
+                               <Flag className="w-4 h-4" /> 一句话结论 (Summary)
+                            </label>
+                            <div className="text-2xl font-bold tracking-tight leading-relaxed">
+                               {briefingResult.summary}
+                            </div>
+                         </div>
+
+                         {/* Grid Modules */}
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="bg-white border border-gray-200 rounded-[2.5rem] p-8 shadow-sm">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-6 block flex items-center gap-2">
+                                  <TrendingUp className="w-4 h-4" /> 项目关键进展 (Key Updates)
+                               </label>
+                               <ul className="space-y-4">
+                                  {briefingResult.keyUpdates.map((u: string, i: number) => (
+                                    <li key={i} className="flex gap-4 group">
+                                       <div className="w-1.5 h-1.5 bg-blue-600 rounded-full mt-1.5 shrink-0 group-hover:scale-150 transition-transform" />
+                                       <p className="text-sm font-bold text-gray-800 leading-relaxed">{u}</p>
+                                    </li>
+                                  ))}
+                               </ul>
+                            </div>
+
+                            <div className="bg-white border border-gray-200 rounded-[2.5rem] p-8 shadow-sm">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-red-600 mb-6 block flex items-center gap-2">
+                                  <ShieldAlert className="w-4 h-4" /> 风险识别 (Risks)
+                               </label>
+                               <div className="space-y-6">
+                                  {briefingResult.risks.map((r: any, i: number) => (
+                                    <div key={i} className="bg-red-50/50 border border-red-100 p-5 rounded-2xl">
+                                       <div className="text-sm font-black text-red-900 mb-1">{r.risk}</div>
+                                       <p className="text-[11px] text-red-700 leading-relaxed">→ 影响：{r.impact}</p>
+                                    </div>
+                                  ))}
+                               </div>
+                            </div>
+
+                            <div className="bg-white border border-gray-200 rounded-[2.5rem] p-8 shadow-sm">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-6 block flex items-center gap-2">
+                                  <Zap className="w-4 h-4" /> 机会点 (Opportunities)
+                               </label>
+                               <ul className="space-y-4">
+                                  {briefingResult.opportunities.map((o: string, i: number) => (
+                                    <li key={i} className="flex gap-3">
+                                       <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                       <p className="text-sm font-medium text-emerald-900 leading-relaxed">{o}</p>
+                                    </li>
+                                  ))}
+                               </ul>
+                            </div>
+
+                            <div className="bg-white border border-gray-200 rounded-[2.5rem] p-8 shadow-sm">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 mb-6 block flex items-center gap-2">
+                                  <Clock className="w-4 h-4" /> 下一步行动 (Next Actions)
+                               </label>
+                               <div className="space-y-4">
+                                  {briefingResult.nextActions.map((a: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
+                                       <div>
+                                          <div className="text-xs font-black text-indigo-900 uppercase tracking-widest">{a.who}</div>
+                                          <div className="text-sm font-bold text-gray-800">{a.what}</div>
+                                       </div>
+                                       <div className="text-[10px] font-black text-indigo-400 uppercase tracking-tighter">{a.when}</div>
+                                    </div>
+                                  ))}
+                               </div>
+                            </div>
+                         </div>
+
+                         {/* Resource Requests */}
+                         <div className="bg-[#f1f5f9] border border-gray-200 rounded-[2.5rem] p-10">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-8 block flex items-center gap-2">
+                               <BarChart3 className="w-4 h-4" /> 资源诉求 (Resource Requests)
+                            </label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                               {briefingResult.resourceRequests.map((r: any, i: number) => (
+                                 <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full">
+                                    <div className="text-sm font-black text-gray-900 mb-3">{r.resource}</div>
+                                    <div className="mt-auto pt-4 border-t border-gray-50">
+                                       <p className="text-[11px] text-gray-500 leading-relaxed">
+                                          <span className="font-black text-blue-600 uppercase text-[9px] mr-1">Why:</span> {r.reason}
+                                       </p>
+                                    </div>
+                                 </div>
+                               ))}
+                            </div>
+                         </div>
+
+                         {/* Strategic Alignment */}
+                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="lg:col-span-2 bg-[#1A1C1E] text-white rounded-[3rem] p-10 overflow-hidden relative">
+                               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600/10 rounded-full blur-[80px] -mr-32 -mt-32" />
+                               <div className="relative z-10 space-y-10">
+                                  <div className="flex items-center gap-3">
+                                     <Users2 className="w-6 h-6 text-emerald-400" />
+                                     <h3 className="text-xl font-bold">Stakeholder Mapping & 博弈分析</h3>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                                     <div className="space-y-6">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-emerald-500/50">当前格局</label>
+                                        <div className="space-y-4">
+                                           {briefingResult.stakeholderMapping.currentLandscape.map((l: string, i: number) => (
+                                             <div key={i} className="text-sm font-bold text-emerald-50 leading-relaxed border-l-2 border-emerald-500/30 pl-4">{l}</div>
+                                           ))}
+                                        </div>
+                                     </div>
+                                     {briefingResult.stakeholderMapping.competitorAnalysis && (
+                                       <div className="space-y-6 bg-white/5 p-6 rounded-2xl border border-white/10">
+                                          <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center justify-between">
+                                             <span>主要对手: {briefingResult.stakeholderMapping.competitorAnalysis.competitorName}</span>
+                                             <ShieldCheck className="w-3 h-3" />
+                                          </label>
+                                          <div className="space-y-4">
+                                             <div>
+                                                <div className="text-[9px] font-black text-gray-500 uppercase mb-2">对手优势</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                   {briefingResult.stakeholderMapping.competitorAnalysis.theirStrengths.map((s: string, i: number) => (
+                                                      <span key={i} className="text-[10px] font-bold bg-white/10 px-2 py-1 rounded-md">{s}</span>
+                                                   ))}
+                                                </div>
+                                             </div>
+                                             <div>
+                                                <div className="text-[9px] font-black text-gray-500 uppercase mb-2">对手风险</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                   {briefingResult.stakeholderMapping.competitorAnalysis.theirRisks.map((r: string, i: number) => (
+                                                      <span key={i} className="text-[10px] font-bold bg-red-400/20 text-red-200 px-2 py-1 rounded-md">{r}</span>
+                                                   ))}
+                                                </div>
+                                             </div>
+                                          </div>
+                                       </div>
+                                     )}
+                                  </div>
+                               </div>
+                            </div>
+
+                            <div className="flex flex-col gap-8">
+                               <div className="bg-amber-500 text-white p-8 rounded-[2.5rem] shadow-xl shadow-amber-500/20">
+                                  <label className="text-[10px] font-black uppercase tracking-widest text-amber-100 mb-4 block">Winning Strategy (赢单策略)</label>
+                                  <div className="text-lg font-black leading-relaxed">{briefingResult.winningStrategy}</div>
+                               </div>
+                               <div className="bg-white border border-gray-200 p-8 rounded-[2.5rem] flex-1">
+                                  <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-4 block">战略意义 (Strategic Implication)</label>
+                                  <div className="text-sm font-medium text-gray-600 leading-relaxed italic border-l-4 border-gray-100 pl-4">
+                                     {briefingResult.strategicImplication}
+                                  </div>
+                               </div>
+                            </div>
+                         </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+               </div>
+
+               <div className="w-[300px] shrink-0 space-y-8">
+                  <div className="bg-[#1A1C1E] text-white rounded-[2.5rem] p-10 shadow-2xl relative overflow-hidden">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-bl-full -mr-16 -mt-16" />
+                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400 mb-8">分析准则</h3>
+                     <div className="space-y-6">
+                        {[
+                          { title: "拒绝流水账", desc: "AI 会自动过滤寒暄与废话，只保留核心信息。" },
+                          { title: "服务决策", desc: "所有输出均围绕“下一步如何推进”展开。" },
+                          { title: "组织映射", desc: "自动识别 Stakeholder 的心理账户与博弈倾向。" },
+                          { title: "资源对齐", desc: "明确告知后端团队需要何种支持才能锁定闭环。" }
+                        ].map((s, i) => (
+                          <div key={i} className="space-y-1">
+                             <div className="text-xs font-bold text-white/90">{s.title}</div>
+                             <div className="text-[10px] text-white/40 leading-relaxed">{s.desc}</div>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+               </div>
+            </motion.div>
+          )}
+
           {activeTab === 'interactions' && (
             <motion.div 
               key="interactions"

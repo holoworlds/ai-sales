@@ -568,3 +568,115 @@ export const generateClientJourney = async (product: string, hotTopics: string, 
 
   return JSON.parse(resp.text || "{}");
 };
+
+export const generateMeetingIntelligence = async (rawInput: string, context: { clientName: string, projectName: string, currentPhase: string, participants: string[] }) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `
+    你是一个顶级的 B2B 战略销售专家和会议情报官。你的任务是将非结构化的沟通信息转换为“可推动决策的结构化项目资产”。
+    
+    【核心目标】
+    服务“推进决策”，不要流水账，不要复述对话。每一句话必须服务于决策，优先写“判断”，再写“事实”。
+    
+    【输入记录】
+    - 项目/客户: ${context.clientName} / ${context.projectName}
+    - 当前阶段: ${context.currentPhase}
+    - 参会人: ${context.participants.join(', ')}
+    - 原始信息: 
+    ${rawInput}
+    
+    请严格按照以下 JSON 结构返回：
+    {
+      "summary": "一句话结论：当前项目状态 + 是否可推进 + 核心判断",
+      "keyUpdates": ["影响决策的事实1", "影响决策的事实2"],
+      "risks": [
+        { "risk": "风险描述", "impact": "对推进的影响/严重性" }
+      ],
+      "opportunities": ["机会点描述1", "为什么这是个切入重点"],
+      "nextActions": [
+        { "who": "执行人", "what": "具体动作", "when": "时间节点" }
+      ],
+      "resourceRequests": [
+        { "resource": "需要的资源", "reason": "为什么要这个资源（支撑什么决策/动作）" }
+      ],
+      "strategicImplication": "项目的战略意义（用于向上管理和体现价值）",
+      "stakeholderMapping": {
+        "currentLandscape": ["关键人A的状态", "关键人B的倾向"],
+        "competitorAnalysis": {
+          "competitorName": "主要竞争对手(如有)",
+          "theirStrengths": [],
+          "theirRisks": []
+        }
+      },
+      "winningStrategy": "当前赢单的关键策略指导"
+    }
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING },
+          keyUpdates: { type: Type.ARRAY, items: { type: Type.STRING } },
+          risks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                risk: { type: Type.STRING },
+                impact: { type: Type.STRING }
+              },
+              required: ["risk", "impact"]
+            }
+          },
+          opportunities: { type: Type.ARRAY, items: { type: Type.STRING } },
+          nextActions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                who: { type: Type.STRING },
+                what: { type: Type.STRING },
+                when: { type: Type.STRING }
+              },
+              required: ["who", "what", "when"]
+            }
+          },
+          resourceRequests: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                resource: { type: Type.STRING },
+                reason: { type: Type.STRING }
+              },
+              required: ["resource", "reason"]
+            }
+          },
+          strategicImplication: { type: Type.STRING },
+          stakeholderMapping: {
+            type: Type.OBJECT,
+            properties: {
+              currentLandscape: { type: Type.ARRAY, items: { type: Type.STRING } },
+              competitorAnalysis: {
+                type: Type.OBJECT,
+                properties: {
+                  competitorName: { type: Type.STRING },
+                  theirStrengths: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  theirRisks: { type: Type.ARRAY, items: { type: Type.STRING } }
+                }
+              }
+            }
+          },
+          winningStrategy: { type: Type.STRING }
+        },
+        required: ["summary", "keyUpdates", "risks", "opportunities", "nextActions", "resourceRequests", "strategicImplication", "winningStrategy"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};

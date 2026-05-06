@@ -64,7 +64,7 @@ export interface ContentAsset {
   id: string;
   clientId: string;
   title: string;
-  type: 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey';
+  type: 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing';
   body: string;
   ownerId: string;
   createdAt: any;
