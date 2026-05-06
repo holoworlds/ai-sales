@@ -47,7 +47,14 @@ export const generateContentAsset = async (type: string, clientInfo: string, req
 export const analyzeClientStage = async (interactions: string) => {
   const model = "gemini-2.0-flash";
   const prompt = `
-    你是一个资深的B2B大客户销售专家和战略顾问。请根据以下客户互动内容（聊天、会议纪要等），分析该客户当前处于哪个决策阶段（Phase 0-7）。
+    你是一个资深的B2B大客户销售专家和战略顾问。请根据提供的客户互动历史和项目情报（Briefings），深度审计该客户的项目状态。
+    特别注意：
+    1. **预算规模 (Budget)**: 必须从对话中捕捉预算数字、预算级别（如“百万级”、“年度预算已留”）。如果提到具体的钱，优先提取。
+    2. **评分系统 (Scoring)**: 重新计算该项目的总评分 (0-100)。
+       - Strategic Value (战略价值, Max 40): 基于客户的行业地位、决策逻辑的复杂度、该场景的普适性。
+       - Feasibility (落地可行性, Max 40): 基于内部是否已有 Champion、客户对合规/技术风险的回应、预算是否已明确。
+       - Progress (推进深度, Max 20): 基于当前处于哪个 Phase。
+    3. **关键人 (Stakeholders)**: 识别并更新 Promoter 和 Key Person 的变动。
     
     【阶段矩阵定义】：
     Phase 0: Status Quo (现状惯性) - 业务照旧，没人提AI，关键问题是“为什么要变？”。角色：行业观察者。关键动作：输出趋势、案例、风险变化。
@@ -674,6 +681,55 @@ export const generateMeetingIntelligence = async (rawInput: string, context: { c
           winningStrategy: { type: Type.STRING }
         },
         required: ["summary", "keyUpdates", "risks", "opportunities", "nextActions", "resourceRequests", "strategicImplication", "winningStrategy"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const generateStrategicPrompt = async (requirements: string, sources: { title: string, content: string }[]) => {
+  const model = "gemini-2.0-flash";
+  const prompt = `
+    你是一个顶级的 AI Prompt Engineer 和 B2B 咨询专家。你的任务是根据用户提供的“基础素材”和“生成要求”，合成一个高水准的 AI 提示词（Prompt）。
+    
+    这个生成的 Prompt 将被销售用于其他的 AI 工具（如 ChatGPT/Gemini/Midjourney）来制作具体的 PPT 交付物、方案文档或推演。
+
+    【所选素材详情】
+    ${sources.map(s => `素材标题: ${s.title}\n内容精华: ${s.content.substring(0, 1000)}...`).join('\n\n')}
+
+    【用户生成要求】
+    ${requirements}
+
+    【任务目标】
+    请生成一个包含以下结构的专家级 Prompt：
+    1. Role (扮演什么专家角色)
+    2. Context (基于上述素材的背景约束)
+    3. Task (具体的创作任务，如 PPT 结构、文案风格)
+    4. Guardrails (需要避开的坑点或必须遵守的合规/专业标准)
+    5. Output Format (输出格式要求)
+
+    请确保生成的提示词是高度结构化的，且能够极大地提升第三方 AI 处理该任务的质量。
+
+    请严格按照以下 JSON 格式返回：
+    {
+      "title": "提示词标题",
+      "promptContent": "完整的提示词正文内容"
+    }
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          promptContent: { type: Type.STRING }
+        },
+        required: ["title", "promptContent"]
       }
     }
   });

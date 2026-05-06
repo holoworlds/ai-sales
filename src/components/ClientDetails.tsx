@@ -74,6 +74,9 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const [generatingBriefing, setGeneratingBriefing] = useState(false);
   const [briefingResult, setBriefingResult] = useState<any>(null);
 
+  // Filter state for assets
+  const [assetFilter, setAssetFilter] = useState<'all' | 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing'>('all');
+
   useEffect(() => {
     if (!auth.currentUser) return;
 
@@ -131,7 +134,21 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
-      const textLog = interactions.map(i => `${i.type}: ${i.content}`).join('\n');
+      // Aggregate interactions AND briefings (meeting minutes) for a complete picture
+      const chatLog = interactions.map(i => `${i.authorId === auth.currentUser?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
+      const briefings = contentAssets
+        .filter(a => a.type === 'Briefing')
+        .map(a => `[Meeting Intelligence - ${a.createdAt?.toDate ? a.createdAt.toDate().toLocaleDateString() : 'Recent'}]:\n${a.body}`)
+        .join('\n\n---\n\n');
+      
+      const textLog = `
+CUSTOMER CHAT HISTORY:
+${chatLog}
+
+MEETING INTELLIGENCE & PROJECT UPDATES:
+${briefings}
+      `.trim();
+
       const result = await analyzeClientStage(textLog);
       setAnalysisResult(result);
       
@@ -1190,22 +1207,65 @@ ${result.winningStrategy}
               className="flex gap-10 h-full overflow-hidden"
             >
               <div className="flex-1 flex flex-col gap-8 overflow-y-auto no-scrollbar">
-                <div className="flex items-center justify-between sticky top-0 bg-[#F5F7FA] py-4 z-10">
-                   <h2 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
-                      <Archive className="w-3.5 h-3.5" /> 生成的战略抵押品
-                   </h2>
-                   <span className="text-[10px] font-bold text-blue-600 bg-white px-2 py-1 rounded border border-gray-200">{contentAssets.length} 项资产</span>
+                <div className="flex flex-col gap-6 sticky top-0 bg-[#F5F7FA] py-4 z-10">
+                   <div className="flex items-center justify-between">
+                      <h2 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
+                         <Archive className="w-3.5 h-3.5" /> 生成的战略抵押品
+                      </h2>
+                      <div className="flex items-center gap-4">
+                        <span 
+                           onClick={() => setAssetFilter('all')}
+                           className="text-[10px] font-bold text-blue-600 bg-white px-2 py-1 rounded border border-gray-200 cursor-pointer hover:bg-blue-50 transition-colors"
+                        >
+                           {contentAssets.length} 项总资产
+                        </span>
+                        {assetFilter !== 'all' && (
+                           <span className="text-[10px] font-bold text-emerald-600 bg-white px-2 py-1 rounded border border-gray-200">
+                              筛选中: {assetFilter} ({contentAssets.filter(a => a.type === assetFilter).length})
+                           </span>
+                        )}
+                      </div>
+                   </div>
+
+                   <div className="flex bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-gray-200 w-fit shadow-sm">
+                      {[
+                        { id: 'all', label: '总体资产' },
+                        { id: 'PPT', label: '演示文稿' },
+                        { id: 'Report', label: '研究报告' },
+                        { id: 'Strategy', label: '战略方案' },
+                        { id: 'Briefing', label: '会议纪要' },
+                        { id: 'Journey', label: '旅途导图' },
+                        { id: 'Prompt', label: '提示词' }
+                      ].map(cat => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setAssetFilter(cat.id as any)}
+                          className={`px-6 py-2.5 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all ${
+                            assetFilter === cat.id 
+                              ? 'bg-[#1A1C1E] text-white shadow-lg' 
+                              : 'text-gray-400 hover:bg-gray-50'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                   </div>
                 </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {contentAssets.length === 0 ? (
+                  {contentAssets.filter(a => assetFilter === 'all' || a.type === assetFilter).length === 0 ? (
                     <div className="col-span-2 p-20 text-center bg-white border border-gray-200 rounded-[3rem] border-dashed">
                       <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6">
                          <FileText className="w-8 h-8 text-gray-200" />
                       </div>
-                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">等待实验室生成</p>
+                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">
+                        {assetFilter === 'all' ? '等待实验室生成' : `暂无 ${assetFilter} 类别资产`}
+                      </p>
                     </div>
                   ) : (
-                    contentAssets.map(asset => (
+                    contentAssets
+                      .filter(a => assetFilter === 'all' || a.type === assetFilter)
+                      .map(asset => (
                       <div key={asset.id} className="bg-white border border-gray-200 p-10 rounded-[2.5rem] flex flex-col shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-gray-50 rounded-bl-[3rem] -mr-12 -mt-12 group-hover:bg-blue-50 transition-colors" />
                         <div className="flex justify-between items-start mb-8">

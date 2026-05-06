@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, deleteDoc } from 'firebase/firestore';
 import { KnowledgeEntry } from '../types';
-import { extractKnowledgeInsights, queryKnowledgeBase } from '../services/gemini';
+import { extractKnowledgeInsights, queryKnowledgeBase, generateStrategicPrompt } from '../services/gemini';
 import { 
   BookOpen, 
   Search, 
@@ -29,7 +29,11 @@ import {
   MessageSquare,
   Send,
   Loader2,
-  Users
+  Users,
+  Wand2,
+  Copy,
+  ChevronUp,
+  FileCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -56,6 +60,13 @@ export default function KnowledgeBase() {
   const [isQuerying, setIsQuerying] = useState(false);
   const [qaHistory, setQaHistory] = useState<{ role: 'user' | 'ai', content: string }[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // Prompt Lab State
+  const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
+  const [isPromptLabOpen, setIsPromptLabOpen] = useState(false);
+  const [promptRequirements, setPromptRequirements] = useState('');
+  const [generatingPrompt, setGeneratingPrompt] = useState(false);
+  const [promptResult, setPromptResult] = useState<{ title: string, promptContent: string } | null>(null);
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -88,6 +99,7 @@ export default function KnowledgeBase() {
     if (!confirm('确定删除此知识节点吗？')) return;
     try {
       await deleteDoc(doc(db, 'knowledge', id));
+      setSelectedEntries(prev => prev.filter(eid => eid !== id));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `knowledge/${id}`);
     }
@@ -112,6 +124,46 @@ export default function KnowledgeBase() {
       setQaHistory(prev => [...prev, { role: 'ai', content: '连接战略大脑失败，请检查网络或配置。' }]);
     } finally {
       setIsQuerying(false);
+    }
+  };
+
+  const handleGeneratePrompt = async () => {
+    if (!promptRequirements.trim() || selectedEntries.length === 0) return;
+    setGeneratingPrompt(true);
+    try {
+      const sources = entries
+        .filter(e => selectedEntries.includes(e.id))
+        .map(e => ({ title: e.title, content: e.content }));
+      
+      const result = await generateStrategicPrompt(promptRequirements, sources);
+      setPromptResult(result);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setGeneratingPrompt(false);
+    }
+  };
+
+  const handleSavePromptAsKnowledge = async () => {
+    if (!promptResult || !auth.currentUser) return;
+    try {
+      await addDoc(collection(db, 'knowledge'), {
+        title: `AI Prompt: ${promptResult.title}`,
+        content: promptResult.promptContent,
+        sourceType: 'document',
+        tags: ['PROMPT', 'AI-SOP'],
+        category: 'strategy',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ownerId: auth.currentUser.uid
+      });
+      alert('Prompt 已成功存入知识库');
+      setIsPromptLabOpen(false);
+      setPromptResult(null);
+      setPromptRequirements('');
+      setSelectedEntries([]);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -369,7 +421,18 @@ export default function KnowledgeBase() {
                   transition={{ delay: idx * 0.05 }}
                   className="bg-white border border-gray-200 p-10 rounded-[2.5rem] relative group overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all"
                 >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-bl-[4rem] flex items-center justify-center -mr-8 -mt-8 group-hover:bg-blue-50 transition-colors">
+                  <div className="absolute top-6 left-6 z-10">
+                    <input 
+                      type="checkbox"
+                      checked={selectedEntries.includes(entry.id)}
+                      onChange={() => setSelectedEntries(prev => 
+                        prev.includes(entry.id) ? prev.filter(id => id !== entry.id) : [...prev, entry.id]
+                      )}
+                      className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-bl-[4rem] flex items-center justify-center -mr-8 -mt-8 group-hover:bg-blue-50 transition-colors">
                      <CatIcon className="w-8 h-8 text-gray-200 group-hover:text-blue-100 transition-colors" />
                   </div>
                   
@@ -653,6 +716,158 @@ export default function KnowledgeBase() {
                     </>
                   )}
                </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Selected Action Bar */}
+      <AnimatePresence>
+        {selectedEntries.length > 0 && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-[#1A1C1E] text-white px-10 py-6 rounded-[2.5rem] shadow-2xl z-40 flex items-center gap-10 border border-white/10 backdrop-blur-xl"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+                <Brain className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-sm font-black whitespace-nowrap">已选择 {selectedEntries.length} 份战略素材</div>
+                <div className="text-[10px] font-bold text-white/40 uppercase tracking-widest mt-0.5">准备进行提示词合成</div>
+              </div>
+            </div>
+            
+            <div className="h-10 w-px bg-white/10" />
+
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setIsPromptLabOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg shadow-blue-500/20 active:scale-95"
+              >
+                <Wand2 className="w-4 h-4 text-blue-200" />
+                进入提示词实验室
+              </button>
+              <button 
+                onClick={() => setSelectedEntries([])}
+                className="text-xs font-bold text-white/40 hover:text-white transition-colors"
+              >
+                取消选择
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Prompt Lab Modal */}
+      <AnimatePresence>
+        {isPromptLabOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsPromptLabOpen(false)} className="absolute inset-0 bg-gray-900/60 backdrop-blur-md" />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.95, opacity: 0 }} 
+              className="bg-white border border-gray-200 rounded-[3.5rem] shadow-2xl w-full max-w-5xl relative z-10 overflow-hidden flex flex-col h-[85vh]"
+            >
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 via-purple-600 to-emerald-600" />
+              
+              <div className="px-12 py-10 border-b border-gray-100 flex justify-between items-center">
+                <div className="flex items-center gap-6">
+                  <div className="w-14 h-14 bg-[#1A1C1E] rounded-2xl flex items-center justify-center shadow-xl">
+                    <Wand2 className="w-7 h-7 text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-black tracking-tight text-gray-900">提示词实验室 (Prompt Lab)</h2>
+                    <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-400 mt-1">基于现有知识资产合成生产力引擎</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsPromptLabOpen(false)} className="p-4 hover:bg-gray-50 rounded-full transition-colors text-gray-400"><X className="w-6 h-6" /></button>
+              </div>
+
+              <div className="flex-1 overflow-hidden flex">
+                {/* Left: Input & Selected Materials */}
+                <div className="w-1/2 border-r border-gray-100 p-12 overflow-y-auto no-scrollbar flex flex-col gap-10">
+                   <div className="space-y-6">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#1A1C1E] flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-blue-600" /> 核心生成要求 (Generation Intent)
+                      </label>
+                      <textarea 
+                        value={promptRequirements}
+                        onChange={e => setPromptRequirements(e.target.value)}
+                        placeholder="例如：我需要一份针对该行业数字化转型的 PPT 提纲，要求专业且富有科技感..."
+                        className="w-full h-48 bg-gray-50 border border-gray-100 rounded-[2.5rem] p-8 text-sm outline-none focus:bg-white focus:border-blue-600 transition-all shadow-inner resize-none font-medium leading-relaxed"
+                      />
+                   </div>
+
+                   <div className="space-y-6">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">
+                         <BookOpen className="w-4 h-4" /> 已选材料源 ({selectedEntries.length})
+                      </label>
+                      <div className="space-y-3">
+                         {entries.filter(e => selectedEntries.includes(e.id)).map(e => (
+                           <div key={e.id} className="flex items-center gap-4 p-4 bg-gray-50/50 rounded-2xl border border-gray-100">
+                              <FileText className="w-4 h-4 text-gray-300" />
+                              <span className="text-[11px] font-bold text-gray-700 truncate">{e.title}</span>
+                           </div>
+                         ))}
+                      </div>
+                   </div>
+
+                   <button 
+                     onClick={handleGeneratePrompt}
+                     disabled={generatingPrompt || !promptRequirements.trim()}
+                     className="w-full py-6 bg-[#1A1C1E] text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.4em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 mt-auto"
+                   >
+                     {generatingPrompt ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                     启动提示词合成
+                   </button>
+                </div>
+
+                {/* Right: Output */}
+                <div className="w-1/2 p-12 bg-gray-50/30 overflow-y-auto no-scrollbar flex flex-col">
+                  {promptResult ? (
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="h-full flex flex-col gap-8">
+                       <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
+                             <FileCode className="w-4 h-4" /> 生成的提示词 (Generated Prompt)
+                          </label>
+                          <div className="flex items-center gap-2">
+                             <button 
+                                onClick={() => {
+                                   navigator.clipboard.writeText(promptResult.promptContent);
+                                   alert('Prompt 已复制');
+                                }}
+                                className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm group"
+                                title="复制到剪贴板"
+                             >
+                                <Copy className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
+                             </button>
+                             <button 
+                                onClick={handleSavePromptAsKnowledge}
+                                className="px-5 py-3 bg-white border border-gray-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-sm"
+                             >
+                                存入知识库
+                             </button>
+                          </div>
+                       </div>
+
+                       <div className="bg-[#1A1C1E] text-emerald-400 p-10 rounded-[3rem] font-mono text-[11px] leading-loose shadow-2xl flex-1 overflow-y-auto custom-scrollbar border border-white/5 whitespace-pre-wrap">
+                          {promptResult.promptContent}
+                       </div>
+                    </motion.div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-20 opacity-30">
+                       <div className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-full flex items-center justify-center mb-6">
+                          <Wand2 className="w-8 h-8 text-gray-300" />
+                       </div>
+                       <p className="text-xs font-black uppercase tracking-widest text-gray-400">等待实验室炼金...</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

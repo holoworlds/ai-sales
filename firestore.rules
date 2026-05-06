@@ -33,7 +33,7 @@ service cloud.firestore {
       return data.title is string && data.title.size() <= 200 &&
              data.content is string && data.content.size() <= 100000 &&
              data.sourceType in ['document', 'feedback', 'market_report', 'word', 'ppt', 'excel', 'pdf'] &&
-             data.category in ['strategy', 'competitor', 'industry', 'product'] &&
+             data.category in ['strategy', 'competitor', 'industry', 'product', 'customer_case'] &&
              data.ownerId == request.auth.uid &&
              (data.get('tags', []) is list) &&
              data.get('tags', []).size() <= 20;
@@ -57,7 +57,13 @@ service cloud.firestore {
              (data.get('missingMaterials', '') is string) &&
              (data.get('progress', '') is string) &&
              (data.get('nextActionSuggestion', '') is string) &&
-             (data.get('nextActionCompleted', false) is bool);
+             (data.get('nextActionCompleted', false) is bool) &&
+             (data.get('promoterDept', '') is string) &&
+             (data.get('interestedProducts', '') is string) &&
+             (data.get('budgetScale', '') is string) &&
+             (data.get('nextActionDate', request.time) is timestamp) &&
+             (data.get('decisionMatrix', {}) is map) &&
+             (data.get('scoreDetails', {}) is map);
     }
 
     function isValidInteraction(data) {
@@ -68,7 +74,7 @@ service cloud.firestore {
 
     function isValidContentAsset(data) {
       return data.title is string && data.title.size() <= 200 &&
-             data.type in ['PPT', 'Report', 'Strategy', 'Prompt', 'Journey'] &&
+             data.type in ['PPT', 'Report', 'Strategy', 'Prompt', 'Journey', 'Briefing'] &&
              data.body is string && data.body.size() <= 100000 &&
              data.ownerId == request.auth.uid;
     }
