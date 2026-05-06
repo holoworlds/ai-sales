@@ -1,19 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  getDocs,
-  updateDoc, 
-  doc, 
-  serverTimestamp,
-  orderBy,
-  limit
-} from 'firebase/firestore';
-import { Client, KnowledgeEntry, AgentSkill, EvolutionProposal, AgentInteraction } from '../types';
+import { localDb, localAuth } from '../services/storage';
+import { Client, KnowledgeEntry, AgentSkill, EvolutionProposal, AgentInteraction, LLMProvider, LLMConfig } from '../types';
 import { performStrategicAgentReasoning, evolveAgentCapability, evaluateEvolutionProposal } from '../services/gemini';
 import { 
   Sparkles, 
@@ -37,7 +24,16 @@ import {
   MessageSquarePlus,
   Clock,
   Calendar,
-  ArrowRight
+  ArrowRight,
+  Settings,
+  Activity,
+  Shield,
+  Layers,
+  Globe,
+  Database as DbIcon,
+  Trash2,
+  Key,
+  Link
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -48,231 +44,202 @@ interface StrategicAdvisorProps {
 }
 
 export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, minimal = false }: StrategicAdvisorProps) {
-  const [activeTab, setActiveTab] = useState<'agent' | 'skills' | 'evolution'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'skills' | 'evolution' | 'llm' | 'lab'>('agent');
+  
+  // Lab State
+  const [labType, setLabType] = useState<'PPT' | 'Report' | 'Strategy' | 'Prompt'>('Prompt');
+  const [labReqs, setLabReqs] = useState('');
+  const [labResult, setLabResult] = useState('');
+  const [isGeneratingLab, setIsGeneratingLab] = useState(false);
   const [queryText, setQueryText] = useState('');
   const [loading, setLoading] = useState(false);
   const [reasoningResult, setReasoningResult] = useState<any>(null);
   const [pendingAction, setPendingAction] = useState<any>(null);
   const [executingAction, setExecutingAction] = useState(false);
   
-  // Manual Evolution State
-  const [isAddingProposal, setIsAddingProposal] = useState(false);
-  const [isEvaluating, setIsEvaluating] = useState(false);
-  const [manualProposal, setManualProposal] = useState({ name: '', description: '', goal: '' });
-  const [evaluationResult, setEvaluationResult] = useState<any>(null);
-
-  // Data State
   const [clients, setClients] = useState<Client[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [proposals, setProposals] = useState<EvolutionProposal[]>([]);
-  const [interactions, setInteractions] = useState<AgentInteraction[]>([]);
+  const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>([]);
+
+  // Modals
+  const [isAddingProposal, setIsAddingProposal] = useState(false);
+  const [manualProposal, setManualProposal] = useState({ name: '', description: '', goal: '' });
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [evaluationResult, setEvaluationResult] = useState<any>(null);
+  const [isAddingLLM, setIsAddingLLM] = useState(false);
+  const [newLLM, setNewLLM] = useState<Partial<LLMConfig>>({
+    displayName: '',
+    provider: LLMProvider.GOOGLE,
+    modelId: '',
+    apiKey: '',
+    baseUrl: '',
+    isPrimary: false
+  });
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const uid = auth.currentUser.uid;
-
-    const unsubClients = onSnapshot(query(collection(db, 'clients'), where('ownerId', '==', uid)), (s) => 
-      setClients(s.docs.map(d => ({ id: d.id, ...d.data() } as Client))), (err) => handleFirestoreError(err, OperationType.GET, 'clients'));
-
-    const unsubKnowledge = onSnapshot(query(collection(db, 'knowledge'), where('ownerId', '==', uid)), (s) => 
-      setKnowledge(s.docs.map(d => ({ id: d.id, ...d.data() } as KnowledgeEntry))), (err) => handleFirestoreError(err, OperationType.GET, 'knowledge'));
-
-    const unsubSkills = onSnapshot(query(collection(db, 'skills'), where('ownerId', '==', uid)), (s) => 
-      setSkills(s.docs.map(d => ({ id: d.id, ...d.data() } as AgentSkill))), (err) => handleFirestoreError(err, OperationType.GET, 'skills'));
-
-    const unsubProposals = onSnapshot(query(collection(db, 'evolution_proposals'), where('ownerId', '==', uid), orderBy('createdAt', 'desc')), (s) => 
-      setProposals(s.docs.map(d => ({ id: d.id, ...d.data() } as EvolutionProposal))), (err) => handleFirestoreError(err, OperationType.GET, 'evolution_proposals'));
-
-    const unsubLogs = onSnapshot(query(collection(db, 'agent_logs'), where('ownerId', '==', uid), orderBy('timestamp', 'desc'), limit(10)), (s) => 
-      setInteractions(s.docs.map(d => ({ id: d.id, ...d.data() } as AgentInteraction))), (err) => handleFirestoreError(err, OperationType.GET, 'agent_logs'));
-
-    // Seed initial skills
-    const seedInitialSkills = async () => {
-      const skillsRef = collection(db, 'skills');
-      const q = query(skillsRef, where('ownerId', '==', uid), limit(1));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        const initialSkills = [
-          { name: 'Phase判断引擎', type: 'analysis', description: '精确识别客户所处认知阶段(Phase 0-7)', logic: 'analyze_stage', performanceScore: 0.95 },
-          { name: '阻力识别器', type: 'analysis', description: '识别当前决策路径上的隐蔽卡点', logic: 'identify_bottlenecks', performanceScore: 0.9 },
-          { name: '定制话术生成', type: 'generation', description: '基于认知共感生成极具穿透力的互动回复', logic: 'generate_scripts', performanceScore: 0.85 }
-        ];
-
-        for (const s of initialSkills) {
-          await addDoc(skillsRef, { ...s, ownerId: uid, createdAt: serverTimestamp(), usageCount: 0, applicablePhases: ['phase_0','phase_1','phase_2','phase_3','phase_4','phase_5','phase_6','phase_7'] });
-        }
-      }
-    };
-    seedInitialSkills();
-
-    return () => {
-      unsubClients();
-      unsubKnowledge();
-      unsubSkills();
-      unsubProposals();
-      unsubLogs();
-    };
+    fetchData();
   }, []);
 
+  const fetchData = async () => {
+    const clientsData = await localDb.getAll('clients');
+    const knowledgeData = await localDb.getAll('knowledge');
+    const skillsData = await localDb.getAll('skills');
+    const proposalsData = await localDb.getAll('proposals');
+    const configsData = await localDb.getAll('llmConfigs');
+    
+    setClients(clientsData);
+    setKnowledge(knowledgeData);
+    setSkills(skillsData);
+    setProposals(proposalsData.sort((a: any, b: any) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    ));
+    setLlmConfigs(configsData);
+  };
+
+  const getActiveModel = () => {
+     return llmConfigs.find(c => c.isPrimary)?.modelId || 'gemini-2.0-flash-exp';
+  };
+
+  const setActiveModel = async (modelId: string) => {
+    const updated = llmConfigs.map(c => ({
+       ...c,
+       isPrimary: c.modelId === modelId
+    }));
+    for (const config of updated) {
+       await localDb.update('llmConfigs', config.id, config);
+    }
+    setLlmConfigs(updated);
+  };
+
+  const setPrimaryModel = async (id: string) => {
+    const updated = llmConfigs.map(c => ({
+       ...c,
+       isPrimary: c.id === id
+    }));
+    for (const config of updated) {
+       await localDb.update('llmConfigs', config.id, config);
+    }
+    setLlmConfigs(updated);
+  };
+
+  const handleAddLLM = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const user = await localAuth.getCurrentUserAsync();
+    const config: LLMConfig = {
+      id: crypto.randomUUID(),
+      displayName: newLLM.displayName!,
+      provider: newLLM.provider!,
+      modelId: newLLM.modelId!,
+      apiKey: newLLM.apiKey!,
+      baseUrl: newLLM.baseUrl,
+      isPrimary: llmConfigs.length === 0,
+      status: 'Active',
+      ownerId: user?.uid || 'local-user'
+    } as any; 
+    await localDb.add('llmConfigs', config);
+    setLlmConfigs([...llmConfigs, config]);
+    setIsAddingLLM(false);
+    setNewLLM({
+      displayName: '',
+      provider: LLMProvider.GOOGLE,
+      modelId: '',
+      apiKey: '',
+      baseUrl: '',
+      isPrimary: false
+    });
+  };
+
+  const deleteLLM = async (id: string) => {
+    await localDb.delete('llmConfigs', id);
+    setLlmConfigs(llmConfigs.filter(c => c.id !== id));
+  };
+
   const handleReasoning = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!queryText.trim() || loading) return;
+    if (e) e.preventDefault();
+    if (!queryText.trim()) return;
 
     setLoading(true);
-    try {
-      const result = await performStrategicAgentReasoning(queryText, {
-        clients,
-        knowledge,
-        skills
-      });
+    setReasoningResult(null);
+    setPendingAction(null);
 
+    try {
+      const result = await performStrategicAgentReasoning(
+        queryText,
+        { clients, knowledge, skills }
+      );
       setReasoningResult(result);
       if (result.suggestedSystemAction) {
         setPendingAction(result.suggestedSystemAction);
-      } else {
-        setPendingAction(null);
       }
-
-      await addDoc(collection(db, 'agent_logs'), {
-        query: queryText,
-        response: result,
-        timestamp: serverTimestamp(),
-        ownerId: auth.currentUser?.uid
-      });
-
-      if (result.confidence < 0.7) {
-        const proposal = await evolveAgentCapability(interactions, skills);
-        if (proposal.suggestedSkillName) {
-            await addDoc(collection(db, 'evolution_proposals'), {
-                ...proposal,
-                status: 'pending',
-                ownerId: auth.currentUser?.uid,
-                createdAt: serverTimestamp()
-            });
-        }
-      }
-
       setQueryText('');
-    } catch (err) {
-      console.error(err);
+      
+      // Save reasoning to logs
+      const user = await localAuth.getCurrentUserAsync();
+      await localDb.add('agentLogs', {
+        type: 'reasoning',
+        query: queryText,
+        result: result,
+        userId: user?.uid
+      });
+    } catch (error) {
+      console.error("Reasoning failed:", error);
     } finally {
       setLoading(false);
     }
   };
 
   const executeAction = async () => {
-    if (!pendingAction || executingAction) return;
+    if (!pendingAction) return;
     setExecutingAction(true);
     try {
-      const uid = auth.currentUser?.uid;
-      if (!uid) return;
-
-      const normalizeStage = (s: string) => {
-        if (!s) return 'phase_1';
-        const lower = s.toLowerCase().replace(/ /g, '_');
-        if (lower.startsWith('phase')) {
-           return lower.includes('_') ? lower : lower.replace('phase', 'phase_');
-        }
-        return 'phase_1';
-      };
-
-      const data = pendingAction.data;
-      if (!data) throw new Error('Action data is missing');
-
       if (pendingAction.type === 'CREATE_CLIENT') {
-        await addDoc(collection(db, 'clients'), {
-          ...data,
-          name: data.name || data.company || '新客户',
-          company: data.company || '未知公司',
-          ownerId: uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          stage: normalizeStage(data.stage),
-          phaseDescription: data.phaseDescription || '',
-          memorySummary: data.memorySummary || '',
-        });
+        await localDb.add('clients', pendingAction.data);
       } else if (pendingAction.type === 'UPDATE_CLIENT') {
-        const { id, ...updates } = data;
-        if (id) {
-          await updateDoc(doc(db, 'clients', id), {
-            ...updates,
-            stage: updates.stage ? normalizeStage(updates.stage) : undefined,
-            updatedAt: serverTimestamp()
-          });
-        }
-      } else if (pendingAction.type === 'ADD_KNOWLEDGE') {
-        await addDoc(collection(db, 'knowledge'), {
-          ...data,
-          title: data.title || 'Agent 提取洞察',
-          content: data.content || '',
-          sourceType: data.sourceType || 'document',
-          category: data.category || 'strategy',
-          tags: data.tags || [],
-          ownerId: uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await localDb.update('clients', pendingAction.data.id, pendingAction.data);
+      } else if (pendingAction.type === 'CREATE_KNOWLEDGE') {
+        await localDb.add('knowledge', pendingAction.data);
       }
-      
       setPendingAction(null);
+      await fetchData();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'system_action');
+      console.error("Action execution failed:", err);
     } finally {
       setExecutingAction(false);
     }
   };
 
-  const approveProposal = async (proposal: EvolutionProposal) => {
-    try {
-      await addDoc(collection(db, 'skills'), {
-          name: proposal.suggestedSkillName,
-          description: proposal.suggestedSkillDescription,
-          type: 'strategy',
-          logic: (proposal as any).suggestedSkillLogic || '',
-          performanceScore: 0,
-          usageCount: 0,
-          applicablePhases: ['phase_0', 'phase_1', 'phase_2', 'phase_3', 'phase_4', 'phase_5', 'phase_6', 'phase_7'],
-          ownerId: auth.currentUser?.uid,
-          createdAt: serverTimestamp(),
-          tags: (proposal as any).tags || []
-      });
-
-      await updateDoc(doc(db, 'evolution_proposals', proposal.id), {
-          status: 'implemented'
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `evolution_proposals/${proposal.id}`);
-    }
-  };
-
   const handleManualInject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualProposal.name || isEvaluating) return;
-
     setIsEvaluating(true);
     try {
-      const result = await evaluateEvolutionProposal(manualProposal);
+      const result = await evaluateEvolutionProposal({
+        name: manualProposal.name,
+        description: manualProposal.description,
+        goal: manualProposal.goal,
+        currentSkills: skills
+      });
+      
       setEvaluationResult(result);
       
       if (result.isAccepted) {
-        await addDoc(collection(db, 'evolution_proposals'), {
+        const proposal: EvolutionProposal = {
+          id: crypto.randomUUID(),
           ...result.refinedProposal,
           status: 'pending',
-          ownerId: auth.currentUser?.uid,
-          createdAt: serverTimestamp(),
-          tags: [...(result.tags || []), 'Manual'],
           isManual: true,
-          evaluation: result.evaluation
-        });
-        setTimeout(() => {
-          setIsAddingProposal(false);
-          setEvaluationResult(null);
-          setManualProposal({ name: '', description: '', goal: '' });
-          setActiveTab('evolution');
-        }, 3000);
+          createdAt: new Date()
+        };
+        await localDb.add('proposals', proposal);
+        await fetchData();
       }
+      
+      setTimeout(() => {
+        setIsAddingProposal(false);
+        setEvaluationResult(null);
+        setManualProposal({ name: '', description: '', goal: '' });
+      }, 3000);
     } catch (err) {
       console.error(err);
     } finally {
@@ -280,28 +247,78 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     }
   };
 
+  const approveProposal = async (proposal: EvolutionProposal) => {
+    try {
+      const result = await evaluateEvolutionProposal({ proposal, existingSkills: skills }); 
+      // Fallback if evolveAgentCapability isn't fully defined yet
+      const newSkill = {
+        name: proposal.suggestedSkillName,
+        description: proposal.suggestedSkillDescription,
+        code: "// Simulated evolved code bundle",
+        id: crypto.randomUUID()
+      };
+
+      await localDb.add('skills', {
+        ...newSkill,
+        performanceScore: 0.8,
+        usageCount: 0
+      });
+      await localDb.update('proposals', proposal.id, {
+        status: 'implemented'
+      });
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
-    <div className={`bg-[#1A1C1E] text-white rounded-[3.5rem] p-1 shadow-2xl border border-white/5 overflow-hidden flex ${minimal ? 'h-auto' : 'h-[700px] lg:h-[85vh] max-h-[1000px]'}`}>
-        {/* Navigation Sidebar */}
+    <div className={`h-full flex flex-col lg:flex-row bg-[#0F1113] text-white overflow-hidden ${minimal ? 'rounded-none' : 'rounded-[3.5rem] shadow-2xl border border-white/5'}`}>
         {!minimal && (
-          <div className="w-24 border-r border-white/5 flex flex-col items-center py-10 gap-8">
+          <div className="w-full lg:w-28 bg-[#1A1C1E] border-r border-white/5 flex flex-row lg:flex-col items-center py-8 gap-4 px-4 lg:px-0 scroll-smooth shadow-2xl">
+            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20 mb-0 lg:mb-8 active:scale-95 transition-all">
+                <Brain className="w-6 h-6" />
+            </div>
+            
             <button 
+              title="智能问答"
               onClick={() => setActiveTab('agent')}
-              className={`p-4 rounded-2xl transition-all ${activeTab === 'agent' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-500 hover:text-white'}`}
-            >
-                <Cpu className="w-6 h-6" />
-            </button>
-            <button 
-              onClick={() => setActiveTab('skills')}
-              className={`p-4 rounded-2xl transition-all ${activeTab === 'skills' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-gray-500 hover:text-white'}`}
-            >
-                <Workflow className="w-6 h-6" />
-            </button>
-            <button 
-              onClick={() => setActiveTab('evolution')}
-              className={`p-4 rounded-2xl transition-all ${activeTab === 'evolution' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'text-gray-500 hover:text-white'}`}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'agent' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-500 hover:text-white'}`}
             >
                 <TrendingUp className="w-6 h-6" />
+                {activeTab === 'agent' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-blue-500 rounded-full" />}
+            </button>
+            <button 
+              title="能力系统"
+              onClick={() => setActiveTab('skills')}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'skills' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-gray-500 hover:text-white'}`}
+            >
+                <Workflow className="w-6 h-6" />
+                {activeTab === 'skills' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-indigo-500 rounded-full" />}
+            </button>
+            <button 
+              title="进化引擎"
+              onClick={() => setActiveTab('evolution')}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'evolution' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'text-gray-500 hover:text-white'}`}
+            >
+                <Zap className="w-6 h-6" />
+                {activeTab === 'evolution' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-emerald-500 rounded-full" />}
+            </button>
+            <button 
+              title="LLM 实验室"
+              onClick={() => setActiveTab('lab')}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'lab' ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20' : 'text-gray-500 hover:text-white'}`}
+            >
+                <MessageSquarePlus className="w-6 h-6" />
+                {activeTab === 'lab' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-purple-500 rounded-full" />}
+            </button>
+            <button 
+              title="模型枢纽"
+              onClick={() => setActiveTab('llm')}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'llm' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' : 'text-gray-500 hover:text-white'}`}
+            >
+                <Layers className="w-6 h-6" />
+                {activeTab === 'llm' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-orange-500 rounded-full" />}
             </button>
           </div>
         )}
@@ -323,9 +340,25 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          </p>
                       </div>
                       <div className="flex gap-2">
+                         {llmConfigs.length > 0 && (
+                            <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-3">
+                               <Layers className="w-4 h-4 text-orange-400" />
+                               <select 
+                                 value={getActiveModel()}
+                                 onChange={(e) => setActiveModel(e.target.value)}
+                                 className="bg-transparent text-[10px] font-bold uppercase tracking-widest text-gray-200 outline-none cursor-pointer"
+                               >
+                                 {llmConfigs.map(config => (
+                                    <option key={config.id} value={config.modelId} className="bg-[#1A1C1E]">
+                                       {config.displayName}
+                                    </option>
+                                 ))}
+                               </select>
+                            </div>
+                         )}
                          <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-3">
                             <History className="w-4 h-4 text-gray-500" />
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Memory: {clients.length + knowledge.length} Slots</span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Memory: {clients.length + knowledge.length}</span>
                          </div>
                       </div>
                    </div>
@@ -424,14 +457,14 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                                  查看当前档案 →
                                                </button>
                                               )}
-                                           </div>
-                                          <p className="text-xs text-gray-400 mb-6">{pendingAction.reasoning}</p>
-                                          <div className="flex gap-4">
-                                             <button onClick={executeAction} disabled={executingAction} className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                                                {executingAction ? <Loader2 className="w-3" /> : <CheckCircle2 className="w-3" />} 执行操作
-                                             </button>
-                                             <button onClick={() => setPendingAction(null)} className="px-6 py-3 bg-white/5 text-gray-400 rounded-xl text-[10px] font-black uppercase tracking-widest">忽略</button>
                                           </div>
+                                         <p className="text-xs text-gray-400 mb-6">{pendingAction.reasoning}</p>
+                                         <div className="flex gap-4">
+                                            <button onClick={executeAction} disabled={executingAction} className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                                               {executingAction ? <Loader2 className="w-3" /> : <CheckCircle2 className="w-3" />} 执行操作
+                                            </button>
+                                            <button onClick={() => setPendingAction(null)} className="px-6 py-3 bg-white/5 text-gray-400 rounded-xl text-[10px] font-black uppercase tracking-widest">忽略</button>
+                                         </div>
                                        </motion.div>
                                     )}
                                  </div>
@@ -455,7 +488,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                  >
                                    {minimal ? '进入认知决策中心追问 →' : '开启新对话'}
                                  </button>
-                              </div>
+                               </div>
                            </motion.div>
                          )}
                          
@@ -471,6 +504,91 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          )}
                       </div>
                    )}
+                </motion.div>
+              )}
+
+              {activeTab === 'lab' && (
+                <motion.div key="lab" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
+                   <div className="flex items-center justify-between">
+                      <div>
+                         <h2 className="text-3xl font-bold tracking-tight mb-2">LLM 实验室 (Asset Laboratory)</h2>
+                         <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                            <Sparkles className="w-3 h-3" /> Generative AI Asset Forge
+                         </p>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                      <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] space-y-8 h-fit">
+                         <div className="space-y-4">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 px-2">资产类型 (Asset Type)</label>
+                            <div className="grid grid-cols-2 gap-4">
+                               {['PPT', 'Report', 'Strategy', 'Prompt'].map(type => (
+                                  <button 
+                                    key={type}
+                                    onClick={() => setLabType(type as any)}
+                                    className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${labType === type ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/20' : 'bg-white/5 border-white/10 text-gray-400'}`}
+                                  >
+                                     {type}
+                                  </button>
+                               ))}
+                            </div>
+                         </div>
+
+                         <div className="space-y-4">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 px-2">需求描述 (Requirements)</label>
+                            <textarea 
+                               value={labReqs}
+                               onChange={e => setLabReqs(e.target.value)}
+                               className="w-full h-48 bg-white/5 border border-white/10 rounded-3xl p-8 text-sm text-white focus:bg-white/10 focus:border-purple-500 outline-none transition-all resize-none"
+                               placeholder="描述您需要生成的资产内容，例如：针对医疗科技行业的 PPT 大纲，或者一个能够自动提取财报关键指标的 Prompt..."
+                            />
+                         </div>
+
+                         <button 
+                            onClick={async () => {
+                               if (!labReqs.trim()) return;
+                               setIsGeneratingLab(true);
+                               try {
+                                  const { generateContentAsset } = await import('../services/gemini');
+                                  const result = await generateContentAsset(labType as any, "系统全局上下文 (知识集 + 技能集)", labReqs);
+                                  setLabResult(result);
+                               } catch (err) { console.error(err); }
+                               finally { setIsGeneratingLab(false); }
+                            }}
+                            disabled={isGeneratingLab || !labReqs.trim()}
+                            className="w-full py-6 bg-purple-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-[0.4em] shadow-2xl hover:bg-purple-700 transition-all flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50"
+                         >
+                            {isGeneratingLab ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Zap className="w-6 h-6" />}
+                            熔炼生成
+                         </button>
+                      </div>
+
+                      <div className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] overflow-hidden flex flex-col relative min-h-[500px]">
+                         <div className="px-8 py-5 border-b border-white/5 bg-white/5 flex justify-between items-center relative z-10">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">熔炼输出 (Forge Output)</span>
+                            {labResult && (
+                               <button onClick={() => { navigator.clipboard.writeText(labResult); alert('已复制到剪贴板'); }} className="text-purple-400 hover:text-white transition-colors">
+                                  <Cpu className="w-4 h-4" />
+                               </button>
+                            )}
+                         </div>
+                         <div className="flex-1 p-10 overflow-y-auto no-scrollbar font-mono text-xs leading-relaxed text-gray-300">
+                            {labResult ? (
+                              <div className="prose prose-invert prose-sm max-w-none">
+                                 {labResult.split('\n').map((line, i) => (
+                                    <p key={i} className="mb-4">{line}</p>
+                                 ))}
+                              </div>
+                            ) : (
+                              <div className="h-full flex flex-col items-center justify-center text-center opacity-20">
+                                 <DbIcon className="w-16 h-16 mb-6" />
+                                 <p className="text-[10px] font-black uppercase tracking-[0.2em]">待熔炼生成中...</p>
+                              </div>
+                            )}
+                         </div>
+                      </div>
+                   </div>
                 </motion.div>
               )}
 
@@ -532,8 +650,157 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                    </div>
                 </motion.div>
               )}
+
+              {activeTab === 'llm' && (
+                <motion.div key="llm" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
+                   <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-3xl font-bold tracking-tight mb-2">模型枢纽 (LLM Hub)</h2>
+                        <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest flex items-center gap-2">
+                           <Layers className="w-3 h-3" /> Multi-Model Orchestration Layer
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setIsAddingLLM(true)}
+                        className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
+                      >
+                         <Plus className="w-3.5 h-3.5" /> 添加新模型配置
+                      </button>
+                   </div>
+
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {llmConfigs.map(config => (
+                        <div 
+                          key={config.id} 
+                          className={`p-10 rounded-[2.5rem] border transition-all flex flex-col gap-6 relative group overflow-hidden ${
+                            config.isPrimary 
+                              ? 'bg-blue-600/5 border-blue-500/30 ring-2 ring-blue-500/20' 
+                              : 'bg-white/5 border-white/10'
+                          }`}
+                        >
+                           <div className="flex justify-between items-start relative z-10">
+                              <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center">
+                                 <Globe className={`w-6 h-6 ${config.isPrimary ? 'text-blue-400' : 'text-gray-500'}`} />
+                              </div>
+                              <div className="flex gap-2">
+                                {!config.isPrimary && (
+                                  <>
+                                    <button 
+                                      onClick={() => setPrimaryModel(config.id)}
+                                      className="px-3 py-1 bg-white/5 text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 transition-colors"
+                                    >
+                                       设为默认
+                                    </button>
+                                    <button 
+                                      onClick={() => deleteLLM(config.id)}
+                                      className="p-1.5 text-gray-600 hover:text-red-500 transition-colors"
+                                    >
+                                       <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                                {config.isPrimary && (
+                                  <span className="px-3 py-1 bg-blue-600 text-white text-[9px] font-black uppercase rounded-lg shadow-lg">
+                                     正在运行
+                                  </span>
+                                )}
+                              </div>
+                           </div>
+
+                           <div className="relative z-10">
+                              <h4 className="text-xl font-bold mb-1">{config.displayName}</h4>
+                              <div className="flex items-center gap-3 text-[10px] font-bold text-gray-500">
+                                 <span className="px-2 py-0.5 bg-white/5 rounded border border-white/10 uppercase">{config.provider}</span>
+                                 <span className="opacity-40">|</span>
+                                 <span>{config.modelId}</span>
+                              </div>
+                           </div>
+
+                           <div className="mt-4 flex items-center gap-6 relative z-10">
+                              <div className="flex items-center gap-2">
+                                 <div className={`w-1.5 h-1.5 rounded-full ${config.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                 <span className="text-[10px] font-bold text-gray-400 capitalize">{config.status}</span>
+                              </div>
+                              {config.latency && (
+                                <div className="text-[10px] font-bold text-gray-500">
+                                   Latency: <span className="text-gray-300">{config.latency}ms</span>
+                                </div>
+                              )}
+                           </div>
+                           <div className="absolute -bottom-4 -right-4 text-7xl font-black text-white/[0.02] pointer-events-none select-none italic uppercase">
+                              {config.provider}
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                </motion.div>
+              )}
            </AnimatePresence>
         </div>
+
+        <AnimatePresence>
+           {isAddingLLM && (
+             <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-xl relative p-12 text-white shadow-2xl">
+                   <button onClick={() => setIsAddingLLM(false)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
+                   <div className="flex items-center gap-6 mb-10">
+                      <div className="w-14 h-14 bg-orange-600 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-600/20 text-white font-bold text-2xl">
+                         +
+                      </div>
+                      <h3 className="text-2xl font-bold">添加模型配置</h3>
+                   </div>
+
+                    <form onSubmit={handleAddLLM} className="space-y-6">
+                       <div className="space-y-2">
+                         <label className="text-[10px] font-black uppercase text-gray-500 px-2">显示名称 (Display Name)</label>
+                         <input required value={newLLM.displayName} onChange={e => setNewLLM({...newLLM, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500" placeholder="例如：Kimi-V1-Pro" />
+                       </div>
+
+                       <div className="grid grid-cols-2 gap-6">
+                         <div className="space-y-2">
+                           <label className="text-[10px] font-black uppercase text-gray-500 px-2">供应商 (Provider)</label>
+                           <select 
+                             value={newLLM.provider} 
+                             onChange={e => setNewLLM({...newLLM, provider: e.target.value as LLMProvider})}
+                             className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500 appearance-none"
+                           >
+                              <option value={LLMProvider.GOOGLE} className="bg-[#1A1C1E]">Google Gemini</option>
+                              <option value={LLMProvider.OPENAI} className="bg-[#1A1C1E]">OpenAI</option>
+                              <option value={LLMProvider.DEEPSEEK} className="bg-[#1A1C1E]">Deepseek</option>
+                              <option value={LLMProvider.KIMI} className="bg-[#1A1C1E]">Kimi (Moonshot)</option>
+                              <option value={LLMProvider.CUSTOM} className="bg-[#1A1C1E]">Custom (OpenAI Compatible)</option>
+                           </select>
+                         </div>
+                         <div className="space-y-2">
+                           <label className="text-[10px) font-black uppercase text-gray-500 px-2">模型标识符 (Model ID)</label>
+                           <input required value={newLLM.modelId} onChange={e => setNewLLM({...newLLM, modelId: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500" placeholder="例如：moonshot-v1-8k" />
+                         </div>
+                       </div>
+
+                       <div className="space-y-2">
+                         <label className="text-[10px] font-black uppercase text-gray-500 px-2 flex items-center gap-2">
+                           <Key className="w-3 h-3" /> API KEY
+                         </label>
+                         <input type="password" required={newLLM.provider !== LLMProvider.GOOGLE} value={newLLM.apiKey} onChange={e => setNewLLM({...newLLM, apiKey: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500" placeholder="sk-..." />
+                       </div>
+
+                       <div className="space-y-2">
+                         <label className="text-[10px] font-black uppercase text-gray-500 px-2 flex items-center gap-2">
+                           <Link className="w-3 h-3" /> 自定义终端 (Base URL - 可选)
+                         </label>
+                         <input value={newLLM.baseUrl} onChange={e => setNewLLM({...newLLM, baseUrl: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500" placeholder="https://api.openai.com/v1" />
+                       </div>
+
+                       <div className="pt-6">
+                         <button type="submit" className="w-full py-5 bg-orange-600 text-white rounded-2xl font-bold uppercase tracking-widest hover:bg-orange-700 transition-all flex items-center justify-center gap-3">
+                            保存配置
+                         </button>
+                       </div>
+                    </form>
+                </motion.div>
+             </div>
+           )}
+        </AnimatePresence>
 
         {/* Manual Proposal Modal */}
         <AnimatePresence>

@@ -8,6 +8,14 @@ export type ClientStage =
   | 'phase_6' // Commercial Decision
   | 'phase_7'; // Proof & Expansion
 
+export enum LLMProvider {
+  GOOGLE = 'Google',
+  OPENAI = 'OpenAI',
+  DEEPSEEK = 'Deepseek',
+  KIMI = 'Kimi',
+  CUSTOM = 'Custom'
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -113,6 +121,21 @@ export interface AgentInteraction {
   };
   timestamp: any;
   ownerId: string;
+}
+
+export interface LLMConfig {
+  id: string;
+  provider: LLMProvider | string;
+  modelId: string;
+  displayName: string;
+  apiKey: string;
+  baseUrl?: string;
+  isPrimary: boolean;
+  status: 'Active' | 'Inactive' | 'Error';
+  latency?: number;
+  ownerId: string;
+  createdAt: any;
+  updatedAt?: any;
 }
 
 export interface EvolutionProposal {

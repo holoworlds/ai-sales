@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
-import { auth, loginWithGoogle, logout, db } from './services/firebase';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDocFromServer } from 'firebase/firestore';
+import { localAuth } from './services/storage';
 import { 
   LayoutDashboard, 
   Users, 
@@ -25,7 +23,7 @@ import JourneyGenerator from './components/JourneyGenerator';
 type View = 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey';
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -43,25 +41,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-
-    // Validate connection to Firestore as per instructions
-    const testConnection = async () => {
+    // Async local auth check
+    const checkAuth = async () => {
       try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
+        const u = await localAuth.getCurrentUserAsync();
+        setUser(u);
       } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration.");
-        }
+        console.error("Auth check failed:", error);
+      } finally {
+        setLoading(false);
       }
     };
-    testConnection();
-
-    return () => unsubscribe();
+    checkAuth();
   }, []);
+
+  const loginLocal = async () => {
+    setLoading(true);
+    try {
+      const u = await localAuth.getCurrentUserAsync();
+      setUser(u);
+    } catch (error) {
+      console.error("Login failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logoutLocal = () => {
+    setUser(null);
+  };
 
   if (loading) {
     return (
@@ -110,7 +118,7 @@ export default function App() {
 
           <button 
             id="google-login-btn"
-            onClick={loginWithGoogle}
+            onClick={loginLocal}
             className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white py-4 rounded-2xl font-bold text-sm tracking-wide hover:bg-blue-700 transition-all group shadow-lg shadow-blue-100"
           >
             使用 Google 账号登录
@@ -199,7 +207,7 @@ export default function App() {
             </div>
           </div>
           <button
-            onClick={logout}
+            onClick={logoutLocal}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
           >
             <LogOut className="w-5 h-5" />

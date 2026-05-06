@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db, auth } from '../services/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { localDb, localAuth } from '../services/storage';
 import { Client } from '../types';
 import { motion } from 'motion/react';
 import StrategicAdvisor from './StrategicAdvisor';
@@ -31,27 +30,26 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const uid = auth.currentUser.uid;
+    const fetchStats = async () => {
+      try {
+        const user = await localAuth.getCurrentUserAsync();
+        if (!user) return;
 
-    const unsubClients = onSnapshot(query(collection(db, 'clients'), where('ownerId', '==', uid)), (s) => {
-      setClients(s.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
-      setLoading(false);
-    });
+        const clientsData = await localDb.getAll('clients');
+        setClients(clientsData);
 
-    const unsubSkills = onSnapshot(query(collection(db, 'skills'), where('ownerId', '==', uid)), (s) => {
-      setSkillCount(s.size);
-    });
+        const skillsData = await localDb.getAll('skills');
+        setSkillCount(skillsData.length);
 
-    const unsubProposals = onSnapshot(query(collection(db, 'evolution_proposals'), where('ownerId', '==', uid), where('status', '==', 'pending')), (s) => {
-      setProposalCount(s.size);
-    });
-
-    return () => {
-      unsubClients();
-      unsubSkills();
-      unsubProposals();
+        const proposalsData = (await localDb.getAll('evolution_proposals')).filter((p: any) => p.status === 'pending');
+        setProposalCount(proposalsData.length);
+      } catch (error) {
+        console.error("Dashboard data fetch failed:", error);
+      } finally {
+        setLoading(false);
+      }
     };
+    fetchStats();
   }, []);
 
   const pendingActionsCount = clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).length;
@@ -123,7 +121,7 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
               <div className="flex items-center gap-8">
                  <div className="relative">
                     <div className="w-24 h-24 rounded-3xl bg-blue-600 flex items-center justify-center shadow-2xl shadow-blue-600/40 relative z-10">
-                       <Cpu className="w-10 h-10 text-white" />
+                       <Brain className="w-10 h-10 text-white" />
                     </div>
                     <div className="absolute -inset-2 bg-blue-600/20 rounded-[2rem] animate-pulse" />
                  </div>

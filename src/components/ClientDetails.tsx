@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { useState, useEffect, useCallback } from 'react';
+import { localDb, localAuth } from '../services/storage';
 import { Client, Interaction, ContentAsset, ClientStage } from '../types';
 import { generateMarketingReply, analyzeClientStage, generateContentAsset, consultClientStrategy, generateClientJourney, generateMeetingIntelligence } from '../services/gemini';
 import { PHASE_MATRIX } from '../constants';
@@ -77,29 +76,32 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   // Filter state for assets
   const [assetFilter, setAssetFilter] = useState<'all' | 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing'>('all');
 
+  const fetchData = useCallback(async () => {
+    const user = await localAuth.getCurrentUserAsync();
+    if (!user) return;
+    
+    // Check if client is still valid
+    if (!client?.id) return;
+
+    const iData = await localDb.getAll(`clients/${client.id}/interactions` as any);
+    iData.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    setInteractions(iData);
+
+    const cData = await localDb.getAll(`clients/${client.id}/content` as any);
+    cData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setContentAssets(cData);
+  }, [client?.id]);
+
   useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const iRef = collection(db, 'clients', client.id, 'interactions');
-    const iQuery = query(iRef, orderBy('timestamp', 'asc'));
-    const iUnsub = onSnapshot(iQuery, (snap) => {
-      setInteractions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Interaction)));
-    });
-
-    const cRef = collection(db, 'clients', client.id, 'content');
-    const cQuery = query(cRef, orderBy('createdAt', 'desc'));
-    const cUnsub = onSnapshot(cQuery, (snap) => {
-      setContentAssets(snap.docs.map(d => ({ id: d.id, ...d.data() } as ContentAsset)));
-    });
-
-    return () => { iUnsub(); cUnsub(); };
-  }, [client.id]);
+    fetchData();
+  }, [fetchData]);
 
   const handleGenerateReply = async () => {
     if (!newInteraction.trim()) return;
     setGeneratingReply(true);
     try {
-      const history = interactions.slice(-5).map(i => `${i.authorId === auth.currentUser?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
+      const user = await localAuth.getCurrentUserAsync();
+      const history = interactions.slice(-5).map(i => `${i.authorId === user?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
       const reply = await generateMarketingReply(newInteraction, history || client.memorySummary || '');
       setAiReply(reply || '');
     } catch (err) {
@@ -110,32 +112,34 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   };
 
   const handleSaveInteraction = async () => {
-    if (!newInteraction.trim() || !auth.currentUser) return;
+    const user = await localAuth.getCurrentUserAsync();
+    if (!newInteraction.trim() || !user) return;
     try {
-      await addDoc(collection(db, 'clients', client.id, 'interactions'), {
+      await localDb.add(`clients/${client.id}/interactions` as any, {
         type: 'chat',
         content: newInteraction,
         aiReplySuggestion: aiReply,
-        authorId: auth.currentUser.uid,
-        timestamp: serverTimestamp(),
+        authorId: user.uid,
       });
       
-      await updateDoc(doc(db, 'clients', client.id), {
-        updatedAt: serverTimestamp()
+      await localDb.update('clients', client.id, {
+        updatedAt: new Date(),
       });
 
+      await fetchData();
       setNewInteraction('');
       setAiReply('');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `clients/${client.id}/interactions`);
+      console.error(error);
     }
   };
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
+      const user = await localAuth.getCurrentUserAsync();
       // Aggregate interactions AND briefings (meeting minutes) for a complete picture
-      const chatLog = interactions.map(i => `${i.authorId === auth.currentUser?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
+      const chatLog = interactions.map(i => `${i.authorId === user?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
       const briefings = contentAssets
         .filter(a => a.type === 'Briefing')
         .map(a => `[Meeting Intelligence - ${a.createdAt?.toDate ? a.createdAt.toDate().toLocaleDateString() : 'Recent'}]:\n${a.body}`)
@@ -155,7 +159,7 @@ ${briefings}
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + (result.recommendedFollowupDays || 7));
 
-      await updateDoc(doc(db, 'clients', client.id), {
+      await localDb.update('clients', client.id, {
         stage: result.stage,
         decisionMatrix: result.matrix,
         nextActionSuggestion: result.nextActionSuggestion,
@@ -171,8 +175,8 @@ ${briefings}
         resistancePoint: result.extractedFields?.resistancePoint || client.resistancePoint,
         missingMaterials: result.extractedFields?.missingMaterials || client.missingMaterials,
         progress: result.extractedFields?.progress || client.progress,
-        updatedAt: serverTimestamp()
       });
+      fetchData();
     } catch (err) {
       console.error(err);
     } finally {
@@ -199,13 +203,14 @@ ${briefings}
         title = `${activeType} for ${client.company} - ${new Date().toLocaleDateString()}`;
       }
 
-      await addDoc(collection(db, 'clients', client.id, 'content'), {
+      const user = await localAuth.getCurrentUserAsync();
+      await localDb.add(`clients/${client.id}/content` as any, {
         title,
         type: activeType,
         body,
-        ownerId: auth.currentUser?.uid,
-        createdAt: serverTimestamp(),
+        ownerId: user?.uid,
       });
+      await fetchData();
       setGenReqs('');
       setJourneyHotTopics('');
     } catch (err) {
@@ -266,13 +271,14 @@ ${result.stakeholderMapping.competitorAnalysis ? `
 ${result.winningStrategy}
       `;
 
-      await addDoc(collection(db, 'clients', client.id, 'content'), {
+      const user = await localAuth.getCurrentUserAsync();
+      await localDb.add(`clients/${client.id}/content` as any, {
         title: `Meeting Intelligence & Progress - ${new Date().toLocaleDateString()}`,
         type: 'Briefing',
         body: body.trim(),
-        ownerId: auth.currentUser?.uid,
-        createdAt: serverTimestamp(),
+        ownerId: user?.uid,
       });
+      await fetchData();
       
     } catch (err) {
       console.error(err);
@@ -299,12 +305,13 @@ ${result.winningStrategy}
 
       if (result.suggestedUpdates) {
         // AI suggests updating client profile based on discussion
-        const updates: any = { updatedAt: serverTimestamp() };
+        const updates: any = { updatedAt: new Date().toISOString() };
         if (result.suggestedUpdates.memorySummary) updates.memorySummary = result.suggestedUpdates.memorySummary;
         if (result.suggestedUpdates.stage) updates.stage = result.suggestedUpdates.stage;
         if (result.suggestedUpdates.nextActionSuggestion) updates.nextActionSuggestion = result.suggestedUpdates.nextActionSuggestion;
         
-        await updateDoc(doc(db, 'clients', client.id), updates);
+        localDb.update('clients', client.id, updates);
+        await fetchData();
       }
     } catch (err) {
       console.error(err);
@@ -315,13 +322,13 @@ ${result.winningStrategy}
 
   const handleSaveProfile = async () => {
     try {
-      await updateDoc(doc(db, 'clients', client.id), {
+      await localDb.update('clients', client.id, {
         ...editForm,
-        updatedAt: serverTimestamp()
       });
+      await fetchData();
       setIsEditing(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `clients/${client.id}`);
+      console.error(error);
     }
   };
 
@@ -668,18 +675,18 @@ ${result.winningStrategy}
                       <div key={idx} className="space-y-4">
                         <div className="flex gap-6 items-start group">
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 shadow-sm ${
-                            i.authorId === auth.currentUser?.uid 
+                            i.authorId === localAuth.getCurrentUser()?.uid 
                               ? 'bg-blue-600 text-white' 
                               : 'bg-white border border-gray-200 text-gray-900'
                           }`}>
-                            {i.authorId === auth.currentUser?.uid ? 'ME' : 'CL'}
+                            {i.authorId === localAuth.getCurrentUser()?.uid ? 'ME' : 'CL'}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm bg-gray-50 p-6 rounded-2xl rounded-tl-none border border-gray-100/50 leading-relaxed text-gray-700 shadow-sm whitespace-pre-wrap">
                               {i.content}
                             </div>
                             <div className="mt-2 text-[8px] font-bold uppercase text-gray-400 tracking-widest px-1">
-                              {i.timestamp?.toDate ? i.timestamp.toDate().toLocaleString() : '处理中...'}
+                              {i.timestamp ? (typeof i.timestamp === 'string' ? new Date(i.timestamp).toLocaleString() : i.timestamp.toLocaleString()) : '处理中...'}
                             </div>
                           </div>
                         </div>
@@ -736,10 +743,10 @@ ${result.winningStrategy}
                         <button 
                           onClick={async () => {
                             try {
-                              await updateDoc(doc(db, 'clients', client.id), {
+                              await localDb.update('clients', client.id, {
                                 nextActionCompleted: !client.nextActionCompleted,
-                                updatedAt: serverTimestamp()
                               });
+                              await fetchData();
                             } catch (err) { console.error(err); }
                           }}
                           className={`flex items-center gap-3 px-8 py-4.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 ${
@@ -1050,10 +1057,10 @@ ${result.winningStrategy}
                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 block">主要推动人 / Champion</label>
                            <div className="text-sm font-bold text-gray-900">{client.promoter || '待识别'}</div>
                         </div>
-                        {(client.stage === 'phase_4' || client.stage === 'phase_5' || client.stage === 'phase_6' || client.stage === 'phase_7') && (
+                        {client.budgetScale && (
                            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
-                              <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 block">预算规模 (PHASE 4+)</label>
-                              <div className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg w-fit border border-emerald-100">{client.budgetScale || '需评估'}</div>
+                              <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 block">预算规模</label>
+                              <div className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg w-fit border border-emerald-100">{client.budgetScale}</div>
                            </motion.div>
                         )}
                      </div>
@@ -1229,7 +1236,7 @@ ${result.winningStrategy}
 
                    <div className="flex bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-gray-200 w-fit shadow-sm">
                       {[
-                        { id: 'all', label: '总体资产' },
+                        { id: 'all', label: '全部项目资产' },
                         { id: 'PPT', label: '演示文稿' },
                         { id: 'Report', label: '研究报告' },
                         { id: 'Strategy', label: '战略方案' },

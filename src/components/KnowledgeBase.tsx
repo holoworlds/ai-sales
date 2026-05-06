@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, deleteDoc } from 'firebase/firestore';
+import { localDb, localAuth } from '../services/storage';
 import { KnowledgeEntry } from '../types';
 import { extractKnowledgeInsights, queryKnowledgeBase, generateStrategicPrompt } from '../services/gemini';
 import { 
@@ -37,6 +36,93 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+
+function KnowledgeCard({ entry, idx, CatIcon, selectedEntries, setSelectedEntries, handleDelete }: any) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: idx * 0.05 }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="bg-white border border-gray-200 p-10 rounded-[2.5rem] relative group overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all"
+    >
+      <div className="absolute top-6 left-6 z-10">
+        <input 
+          type="checkbox"
+          checked={selectedEntries.includes(entry.id)}
+          onChange={() => setSelectedEntries((prev: string[]) => 
+            prev.includes(entry.id) ? prev.filter(id => id !== entry.id) : [...prev, entry.id]
+          )}
+          className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+        />
+      </div>
+
+      <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-bl-[4rem] flex items-center justify-center -mr-8 -mt-8 group-hover:bg-blue-50 transition-colors">
+         <CatIcon className="w-8 h-8 text-gray-200 group-hover:text-blue-100 transition-colors" />
+      </div>
+      
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${
+            entry.sourceType === 'document' ? 'bg-blue-50 border-blue-100 text-blue-600' :
+            entry.sourceType === 'feedback' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+            entry.sourceType === 'word' ? 'bg-indigo-50 border-indigo-100 text-indigo-600' :
+            entry.sourceType === 'pdf' ? 'bg-red-50 border-red-100 text-red-600' :
+            entry.sourceType === 'excel' ? 'bg-emerald-100 border-emerald-200 text-emerald-800' :
+            entry.sourceType === 'ppt' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+            'bg-purple-50 border-purple-100 text-purple-600'
+          }`}>
+            {entry.sourceType === 'document' ? '文档集群' : 
+             entry.sourceType === 'feedback' ? '反馈循环' : 
+             entry.sourceType === 'word' ? 'WORD 文档' :
+             entry.sourceType === 'pdf' ? 'PDF文件' :
+             entry.sourceType === 'excel' ? 'EXCEL 表格' :
+             entry.sourceType === 'ppt' ? 'PPT 演示' :
+             '市场情报'}
+          </span>
+          <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest flex items-center gap-2">
+             <Clock className="w-3.5 h-3.5" />
+             {entry.createdAt?.toDate ? entry.createdAt.toDate().toLocaleDateString('en-GB') : '刚刚'}
+          </span>
+        </div>
+        <AnimatePresence>
+          {isHovered && (
+            <motion.button 
+              initial={{ opacity: 0, scale: 0.8, x: 10 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.8, x: 10 }}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={(e) => handleDelete(entry.id, e)}
+              className="p-3 text-red-500 bg-red-50 rounded-2xl transition-all shadow-xl shadow-red-500/10 border border-red-100/50 flex items-center justify-center"
+              title="永久移除此资产"
+            >
+               <Trash2 className="w-4 h-4" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <h3 className="text-2xl font-bold tracking-tight text-[#1A1C1E] mb-4 leading-tight">{entry.title}</h3>
+      
+      <div className="text-sm text-gray-600 leading-relaxed mb-8 line-clamp-3 font-medium">
+        {entry.content}
+      </div>
+
+      <div className="flex flex-wrap gap-3 pt-6 border-t border-gray-50">
+        {entry.tags.map((tag: string) => (
+          <span key={tag} className="text-[10px] font-bold text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg flex items-center gap-2 hover:bg-gray-100 transition-colors cursor-default">
+            <Tag className="w-3 h-3 text-blue-400" />
+            #{tag.toUpperCase()}
+          </span>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
 
 export default function KnowledgeBase() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
@@ -94,14 +180,27 @@ export default function KnowledgeBase() {
     }
   };
 
+  const fetchData = async () => {
+    const data = await localDb.getAll('knowledge');
+    // Sort by updatedAt desc
+    data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    setEntries(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('确定删除此知识节点吗？')) return;
     try {
-      await deleteDoc(doc(db, 'knowledge', id));
+      await localDb.delete('knowledge', id);
+      await fetchData();
       setSelectedEntries(prev => prev.filter(eid => eid !== id));
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `knowledge/${id}`);
+      console.error(err);
     }
   };
 
@@ -132,8 +231,8 @@ export default function KnowledgeBase() {
     setGeneratingPrompt(true);
     try {
       const sources = entries
-        .filter(e => selectedEntries.includes(e.id))
-        .map(e => ({ title: e.title, content: e.content }));
+          .filter(e => selectedEntries.includes(e.id))
+          .map(e => ({ title: e.title, content: e.content }));
       
       const result = await generateStrategicPrompt(promptRequirements, sources);
       setPromptResult(result);
@@ -145,18 +244,18 @@ export default function KnowledgeBase() {
   };
 
   const handleSavePromptAsKnowledge = async () => {
-    if (!promptResult || !auth.currentUser) return;
+    const user = await localAuth.getCurrentUserAsync();
+    if (!promptResult || !user) return;
     try {
-      await addDoc(collection(db, 'knowledge'), {
+      await localDb.add('knowledge', {
         title: `AI Prompt: ${promptResult.title}`,
         content: promptResult.promptContent,
         sourceType: 'document',
         tags: ['PROMPT', 'AI-SOP'],
         category: 'strategy',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ownerId: auth.currentUser.uid
+        ownerId: user.uid
       });
+      await fetchData();
       alert('Prompt 已成功存入知识库');
       setIsPromptLabOpen(false);
       setPromptResult(null);
@@ -176,20 +275,10 @@ export default function KnowledgeBase() {
     { id: 'product', label: '产品能力', icon: Layers },
   ];
 
-  useEffect(() => {
-    const q = query(collection(db, 'knowledge'), orderBy('updatedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as KnowledgeEntry)));
-      setLoading(false);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'knowledge');
-    });
-    return () => unsubscribe();
-  }, []);
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !auth.currentUser) return;
+    const user = await localAuth.getCurrentUserAsync();
+    if (!file || !user) return;
 
     const fileName = file.name;
     const fileExt = fileName.split('.').pop()?.toLowerCase();
@@ -204,17 +293,16 @@ export default function KnowledgeBase() {
           const rawData: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
 
           for (const row of rawData) {
-            await addDoc(collection(db, 'knowledge'), {
+            await localDb.add('knowledge', {
               title: row['标题'] || row['Title'] || `来自 ${fileName}`,
               content: row['内容'] || row['Content'] || JSON.stringify(row),
               sourceType: 'excel',
               tags: (row['标签'] || row['Tags'] || '').split(',').map((t: string) => t.trim()).filter(Boolean),
               category: 'industry',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              ownerId: auth.currentUser?.uid
+              ownerId: user.uid
             });
           }
+          await fetchData();
           alert(`成功从 Excel 导入 ${rawData.length} 条知识点`);
           setShowSuccess(true);
           setTimeout(() => {
@@ -247,14 +335,14 @@ export default function KnowledgeBase() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    const user = await localAuth.getCurrentUserAsync();
     try {
-      await addDoc(collection(db, 'knowledge'), {
+      await localDb.add('knowledge', {
         ...newEntry,
         tags: newEntry.tags.split(',').map(t => t.trim()).filter(Boolean),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ownerId: auth.currentUser?.uid
+        ownerId: user?.uid
       });
+      await fetchData();
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
@@ -262,7 +350,7 @@ export default function KnowledgeBase() {
       }, 2000);
       setNewEntry({ title: '', content: '', sourceType: 'document', tags: '', category: 'strategy' });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'knowledge');
+      console.error(err);
     }
   };
 
@@ -414,75 +502,15 @@ export default function KnowledgeBase() {
               const CatIcon = category.icon;
               
               return (
-                <motion.div 
-                  key={entry.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                  className="bg-white border border-gray-200 p-10 rounded-[2.5rem] relative group overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all"
-                >
-                  <div className="absolute top-6 left-6 z-10">
-                    <input 
-                      type="checkbox"
-                      checked={selectedEntries.includes(entry.id)}
-                      onChange={() => setSelectedEntries(prev => 
-                        prev.includes(entry.id) ? prev.filter(id => id !== entry.id) : [...prev, entry.id]
-                      )}
-                      className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-bl-[4rem] flex items-center justify-center -mr-8 -mt-8 group-hover:bg-blue-50 transition-colors">
-                     <CatIcon className="w-8 h-8 text-gray-200 group-hover:text-blue-100 transition-colors" />
-                  </div>
-                  
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-4">
-                      <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${
-                        entry.sourceType === 'document' ? 'bg-blue-50 border-blue-100 text-blue-600' :
-                        entry.sourceType === 'feedback' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                        entry.sourceType === 'word' ? 'bg-indigo-50 border-indigo-100 text-indigo-600' :
-                        entry.sourceType === 'pdf' ? 'bg-red-50 border-red-100 text-red-600' :
-                        entry.sourceType === 'excel' ? 'bg-emerald-100 border-emerald-200 text-emerald-800' :
-                        entry.sourceType === 'ppt' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-                        'bg-purple-50 border-purple-100 text-purple-600'
-                      }`}>
-                        {entry.sourceType === 'document' ? '文档集群' : 
-                         entry.sourceType === 'feedback' ? '反馈循环' : 
-                         entry.sourceType === 'word' ? 'WORD 文档' :
-                         entry.sourceType === 'pdf' ? 'PDF文件' :
-                         entry.sourceType === 'excel' ? 'EXCEL 表格' :
-                         entry.sourceType === 'ppt' ? 'PPT 演示' :
-                         '市场情报'}
-                      </span>
-                      <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest flex items-center gap-2">
-                         <Clock className="w-3.5 h-3.5" />
-                         {entry.createdAt?.toDate ? entry.createdAt.toDate().toLocaleDateString('en-GB') : '刚刚'}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={(e) => handleDelete(entry.id, e)}
-                      className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                    >
-                       <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <h3 className="text-2xl font-bold tracking-tight text-[#1A1C1E] mb-4 leading-tight">{entry.title}</h3>
-                  
-                  <div className="text-sm text-gray-600 leading-relaxed mb-8 line-clamp-3 font-medium">
-                    {entry.content}
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 pt-6 border-t border-gray-50">
-                    {entry.tags.map(tag => (
-                      <span key={tag} className="text-[10px] font-bold text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg flex items-center gap-2 hover:bg-gray-100 transition-colors cursor-default">
-                        <Tag className="w-3 h-3 text-blue-400" />
-                        #{tag.toUpperCase()}
-                      </span>
-                    ))}
-                  </div>
-                </motion.div>
+                <KnowledgeCard 
+                  key={entry.id} 
+                  entry={entry} 
+                  idx={idx} 
+                  CatIcon={CatIcon} 
+                  selectedEntries={selectedEntries} 
+                  setSelectedEntries={setSelectedEntries} 
+                  handleDelete={handleDelete} 
+                />
               );
             })
           )}

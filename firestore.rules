@@ -98,6 +98,15 @@ service cloud.firestore {
              data.ownerId == request.auth.uid;
     }
 
+    function isValidLLMConfig(data) {
+      return data.provider in ['Google', 'OpenAI', 'Anthropic', 'Custom'] &&
+             data.modelId is string && data.modelId.size() <= 100 &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.isPrimary is bool &&
+             data.status in ['Active', 'Inactive', 'Error'] &&
+             data.ownerId == request.auth.uid;
+    }
+
     // --- Rules ---
 
     match /skills/{skillId} {
@@ -116,6 +125,13 @@ service cloud.firestore {
       allow read: if isOwner(existing().ownerId);
       allow create: if isSignedIn() && isValidEvolutionProposal(incoming()) && incoming().createdAt == request.time;
       allow update: if isOwner(existing().ownerId) && isValidEvolutionProposal(incoming());
+    }
+
+    match /llm_configs/{configId} {
+      allow read: if isOwner(existing().ownerId);
+      allow create: if isSignedIn() && isValidLLMConfig(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(existing().ownerId) && isValidLLMConfig(incoming());
+      allow delete: if isOwner(existing().ownerId);
     }
 
     match /knowledge/{knowledgeId} {

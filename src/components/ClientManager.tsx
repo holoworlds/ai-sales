@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
-import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
+import { localDb, localAuth } from '../services/storage';
 import { Client, ClientStage } from '../types';
 import { PHASE_MATRIX } from '../constants';
 import { analyzeClientStage } from '../services/gemini';
@@ -83,9 +82,24 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     XLSX.writeFile(workbook, `Client_Assets_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
-  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const fetchData = async () => {
+    const user = await localAuth.getCurrentUserAsync();
+    if (!user) return;
+    const data = await localDb.getAll('clients');
+    // Sort by updatedAt desc
+    data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    setClients(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !auth.currentUser) return;
+    const user = await localAuth.getCurrentUserAsync();
+    if (!file || !user) return;
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -121,54 +135,50 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
 
         let importedCount = 0;
 
-        for (const row of rawData) {
-          const processedRow: any = {};
-          
-          // Clean keys and map them
-          Object.keys(row).forEach(key => {
-            const cleanKey = key.trim();
-            // Check for matches in our map
-            for (const [header, field] of Object.entries(headerMap)) {
-              if (cleanKey.includes(header)) {
-                processedRow[field] = row[key];
-                break;
+          for (const row of rawData) {
+            const processedRow: any = {};
+            
+            Object.keys(row).forEach(key => {
+              const cleanKey = key.trim();
+              for (const [header, field] of Object.entries(headerMap)) {
+                if (cleanKey.includes(header)) {
+                  processedRow[field] = row[key];
+                  break;
+                }
               }
-            }
-          });
+            });
 
-          // Handle stage mapping
-          let stage: ClientStage = 'phase_0';
-          const stageValue = String(processedRow['stage'] || '').trim();
-          if (stageValue) {
-            for (const [key, value] of Object.entries(PHASE_MATRIX)) {
-              if (value.label === stageValue || key === stageValue || stageValue.toLowerCase().includes(key.toLowerCase())) {
-                stage = key as ClientStage;
-                break;
+            let stage: ClientStage = 'phase_0';
+            const stageValue = String(processedRow['stage'] || '').trim();
+            if (stageValue) {
+              for (const [key, value] of Object.entries(PHASE_MATRIX)) {
+                if (value.label === stageValue || key === stageValue || stageValue.toLowerCase().includes(key.toLowerCase())) {
+                  stage = key as ClientStage;
+                  break;
+                }
               }
             }
+
+            await localDb.add('clients', {
+              company: processedRow['company'] || '未命名企业',
+              name: processedRow['name'] || processedRow['keyPerson'] || '未命名联系人',
+              promoter: processedRow['promoter'] || '',
+              keyPerson: processedRow['keyPerson'] || '',
+              groupMeeting: processedRow['groupMeeting'] || '',
+              product: processedRow['product'] || '',
+              scale: processedRow['scale'] || '',
+              projectScore: Number(processedRow['projectScore']) || 0,
+              stage,
+              resistancePoint: processedRow['resistancePoint'] || '',
+              missingMaterials: processedRow['missingMaterials'] || '',
+              nextActionSuggestion: processedRow['nextActionSuggestion'] || '',
+              progress: processedRow['progress'] || '',
+              ownerId: user.uid,
+              nextActionCompleted: false
+            });
+            importedCount++;
           }
-
-          await addDoc(collection(db, 'clients'), {
-            company: processedRow['company'] || '未命名企业',
-            name: processedRow['name'] || processedRow['keyPerson'] || '未命名联系人',
-            promoter: processedRow['promoter'] || '',
-            keyPerson: processedRow['keyPerson'] || '',
-            groupMeeting: processedRow['groupMeeting'] || '',
-            product: processedRow['product'] || '',
-            scale: processedRow['scale'] || '',
-            projectScore: Number(processedRow['projectScore']) || 0,
-            stage,
-            resistancePoint: processedRow['resistancePoint'] || '',
-            missingMaterials: processedRow['missingMaterials'] || '',
-            nextActionSuggestion: processedRow['nextActionSuggestion'] || '',
-            progress: processedRow['progress'] || '',
-            ownerId: auth.currentUser.uid,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            nextActionCompleted: false
-          });
-          importedCount++;
-        }
+          await fetchData();
         alert(`导入完成：共成功导入 ${importedCount} 条记录`);
       } catch (err) {
         console.error("Import error:", err);
@@ -179,44 +189,24 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     e.target.value = ''; // Reset input
   };
 
-  useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, 'clients'),
-      where('ownerId', '==', auth.currentUser.uid),
-      orderBy('updatedAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
-      setClients(data);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'clients');
-    });
-
-    return () => unsubscribe();
-  }, []);
-
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || isCreatingClient) return;
+    const user = await localAuth.getCurrentUserAsync();
+    if (!user || isCreatingClient) return;
     setIsCreatingClient(true);
     try {
-      await addDoc(collection(db, 'clients'), {
+      await localDb.add('clients', {
         ...newClient,
         stage: 'phase_0' as ClientStage,
-        ownerId: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        ownerId: user.uid,
         nextActionSuggestion: '正在为您初始化战术建议...',
         nextActionCompleted: false
       });
+      await fetchData();
       setIsAddingClient(false);
       setNewClient({ name: '', company: '', industry: '' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'clients');
+      console.error(error);
     } finally {
       setIsCreatingClient(false);
     }
@@ -226,20 +216,19 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     if (!quickLogClient || !logContent.trim()) return;
     setIsLogging(true);
     try {
-      await addDoc(collection(db, 'clients', quickLogClient.id, 'interactions'), {
+      const user = await localAuth.getCurrentUserAsync();
+      await localDb.add(`clients/${quickLogClient.id}/interactions` as any, {
         clientId: quickLogClient.id,
         content: logContent,
         type: 'note',
-        authorId: auth.currentUser?.uid,
-        timestamp: serverTimestamp()
+        authorId: user?.uid
       });
 
-      // Quick update: run analysis implicitly
       const result = await analyzeClientStage(logContent);
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + (result.recommendedFollowupDays || 7));
 
-      await updateDoc(doc(db, 'clients', quickLogClient.id), {
+      await localDb.update('clients', quickLogClient.id, {
         stage: result.stage,
         decisionMatrix: result.matrix,
         nextActionSuggestion: result.nextActionSuggestion,
@@ -254,9 +243,9 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
         resistancePoint: result.extractedFields?.resistancePoint || quickLogClient.resistancePoint,
         missingMaterials: result.extractedFields?.missingMaterials || quickLogClient.missingMaterials,
         progress: result.extractedFields?.progress || quickLogClient.progress,
-        updatedAt: serverTimestamp()
       });
 
+      await fetchData();
       setQuickLogClient(null);
       setLogContent('');
     } catch (err) {
@@ -269,10 +258,10 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
   const handleToggleAction = async (e: React.MouseEvent, client: Client) => {
     e.stopPropagation();
     try {
-      await updateDoc(doc(db, 'clients', client.id), {
-        nextActionCompleted: !client.nextActionCompleted,
-        updatedAt: serverTimestamp()
+      await localDb.update('clients', client.id, {
+        nextActionCompleted: !client.nextActionCompleted
       });
+      await fetchData();
     } catch (err) {
       console.error(err);
     }

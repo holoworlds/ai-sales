@@ -59,6 +59,19 @@
         "status": { "type": "string", "enum": ["pending", "approved", "rejected", "implemented"] },
         "ownerId": { "type": "string" }
       }
+    },
+    "LLMConfig": {
+      "title": "大模型引擎配置",
+      "description": "存储底层大语言模型的接入参数与状态",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["Google", "OpenAI", "Anthropic", "Custom"] },
+        "modelId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "isPrimary": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["Active", "Inactive", "Error"] },
+        "ownerId": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -81,6 +94,10 @@
     "/evolution_proposals": {
       "schema": "EvolutionProposal",
       "description": "系统进化提案集合"
+    },
+    "/llm_configs": {
+      "schema": "LLMConfig",
+      "description": "模型枢纽配置"
     }
   }
 }
