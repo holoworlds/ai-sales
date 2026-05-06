@@ -9,9 +9,12 @@ const API_BASE = '/api/db';
   const safeJson = async (res: Response) => {
     try {
       const text = await res.text();
-      return text ? JSON.parse(text) : null;
+      if (!text || text.trim().startsWith('<!doctype') || text.trim().startsWith('<html')) {
+        return null;
+      }
+      return JSON.parse(text);
     } catch (err) {
-      console.error('JSON parsing failed:', err);
+      // Only log if it's actually supposed to be JSON but failed
       return null;
     }
   };

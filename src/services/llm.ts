@@ -1,5 +1,4 @@
 
-import { GoogleGenAI } from "@google/genai";
 import { localDb } from "./storage";
 import { LLMProvider, LLMConfig } from "../types";
 
@@ -9,23 +8,17 @@ const getActiveConfig = async (): Promise<LLMConfig | null> => {
   
   if (found) return found;
 
-  // Fallback to platform Gemini key if available
-  // In this environment, we should try to use the provided key
-  const platformKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-  if (platformKey) {
-    return {
-      id: 'default-gemini',
-      provider: LLMProvider.GOOGLE,
-      modelId: 'gemini-2.0-flash',
-      displayName: 'Gemini (Default)',
-      apiKey: platformKey,
-      isPrimary: true,
-      status: 'Active',
-      createdAt: new Date().toISOString()
-    } as any;
-  }
-
-  return null;
+  // If no config found, return a default for Gemini
+  return {
+    id: 'default-gemini',
+    provider: LLMProvider.GOOGLE,
+    modelId: 'gemini-2.0-flash',
+    displayName: 'Gemini (System Default)',
+    apiKey: '', // Empty means use server default
+    isPrimary: true,
+    status: 'Active',
+    createdAt: new Date().toISOString()
+  } as any;
 };
 
 export const getActiveModel = async () => {
@@ -37,22 +30,29 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
   const config = await getActiveConfig();
   
   if (!config) {
-    throw new Error('未配置有效的模型。请在管理界面配置模型。');
+    throw new Error('未配置有效的模型');
   }
 
   if (config.provider === LLMProvider.GOOGLE) {
-    const genAI = new (GoogleGenAI as any)(config.apiKey);
-    const model = genAI.getGenerativeModel({ 
-        model: config.modelId,
-        systemInstruction: options.systemInstruction
+    const response = await fetch('/api/llm/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        modelId: config.modelId,
+        systemInstruction: options.systemInstruction,
+        json: options.json,
+        apiKey: config.apiKey
+      })
     });
-    
-    const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: options.json ? { responseMimeType: "application/json" } : undefined
-    });
-    
-    return result.response.text();
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'LLM 请求失败');
+    }
+
+    const data = await response.json();
+    return data.text;
   } else {
     // OpenAI Compatible APIs (OpenAI, Deepseek, Kimi, etc.)
     const baseUrl = config.baseUrl || 

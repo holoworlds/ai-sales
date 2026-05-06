@@ -39,16 +39,20 @@ async function startServer() {
   };
 
   const writeData = async (collection: string, data: any[]) => {
-    await fs.writeFile(getFilePath(collection), JSON.stringify(data, null, 2), 'utf-8');
+    const filePath = getFilePath(collection);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
   };
 
-  app.get('/api/db/:collection', async (req, res) => {
-    const data = await readData(req.params.collection);
+  // --- Database API ---
+  app.get('/api/db/*', async (req, res) => {
+    const collection = req.params[0];
+    const data = await readData(collection);
     res.json(data);
   });
 
-  app.post('/api/db/:collection', async (req, res) => {
-    const { collection } = req.params;
+  app.post('/api/db/*', async (req, res) => {
+    const collection = req.params[0];
     const items = await readData(collection);
     const newItem = req.body;
     items.push(newItem);
@@ -56,8 +60,9 @@ async function startServer() {
     res.status(201).json(newItem);
   });
 
-  app.put('/api/db/:collection/:id', async (req, res) => {
-    const { collection, id } = req.params;
+  app.put('/api/db/*/:id', async (req, res) => {
+    const collection = req.params[0]; 
+    const id = req.params.id;
     const items = await readData(collection);
     const index = items.findIndex((i: any) => i.id === id);
     if (index !== -1) {
@@ -69,15 +74,45 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/db/:collection/:id', async (req, res) => {
-    const { collection, id } = req.params;
+  app.delete('/api/db/*/:id', async (req, res) => {
+    const collection = req.params[0];
+    const id = req.params.id;
     const items = await readData(collection);
     const filtered = items.filter((i: any) => i.id !== id);
     await writeData(collection, filtered);
     res.status(204).end();
   });
 
-  // Mock User Identity persistent store
+  // --- LLM Proxy ---
+  app.post('/api/llm/generate', async (req, res) => {
+    try {
+      const { prompt, modelId, systemInstruction, json, apiKey: userProvidedKey } = req.body;
+      const apiKey = userProvidedKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: 'No API key provided. Please configure it in the environment or settings.' });
+      }
+
+      const { GoogleGenAI } = await import('@google/genai');
+      const genAI = new (GoogleGenAI as any)(apiKey);
+      const model = (genAI as any).getGenerativeModel({ 
+        model: modelId || 'gemini-2.0-flash',
+        systemInstruction
+      });
+
+      const result = await (model as any).generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: json ? { responseMimeType: "application/json" } : undefined
+      });
+
+      res.json({ text: result.response.text() });
+    } catch (err: any) {
+      console.error('LLM Proxy Error:', err);
+      res.status(500).json({ error: err.message || 'LLM Generation failed' });
+    }
+  });
+
+  // --- Auth ---
   app.get('/api/auth/me', async (req, res) => {
      try {
        const userData = await fs.readFile(path.join(DATA_DIR, 'user_identity.json'), 'utf-8');
