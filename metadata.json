@@ -1,6 +1,6 @@
 {
-  "name": "AI B2B Marketing Pro",
-  "description": "An intelligent B2B marketing consultant that automates knowledge learning, client relationship management, and real-time content generation.",
+  "name": "Nexus AI: 认知进化与记忆系统",
+  "description": "基于认知科学构建的下一代智能 Agent 框架，具备长期记忆、动态战略规划和自主技能进化能力。",
   "requestFramePermissions": [
     "camera",
     "microphone"

@@ -74,7 +74,19 @@ export const analyzeClientStage = async (interactions: string) => {
         "strategicValue": 0-40,
         "feasibility": 0-40,
         "progress": 0-20,
-        "total": 0-100
+        "total": 0-100,
+        "breakdown": {
+          "industryPotential": 0-10,
+          "orgMaturity": 0-10,
+          "strategicFit": 0-10,
+          "growthPressure": 0-10,
+          "championSupport": 0-10,
+          "budgetClarity": 0-10,
+          "decisionPath": 0-10,
+          "competitivePlay": 0-10,
+          "interactionQuality": 0-10,
+          "relationshipDepth": 0-10
+        }
       }
     }
 
@@ -182,10 +194,42 @@ export const generateClientJourney = async (clientInfo: any, interactions?: any,
 };
 
 export const generateMeetingIntelligence = async (interactions: any, clientContext?: any) => {
-  const prompt = `从互动历史中提取会议情报。
-  互动：${JSON.stringify(interactions)}
-  背景：${JSON.stringify(clientContext)}`;
-  return await callLLM(prompt, { json: true });
+  const prompt = `
+    你是一个资深的项目分析专家。请从提供的互动历史中提取深度结构化的“会议情报”与“项目进展”。
+    
+    【提取要求】：
+    1. 识别关键进展、潜在风险、核心机会、待办行动及资源诉求。
+    2. 基于组织行为学，分析当前的 Stakeholder 格局。
+    3. 如果涉及竞对，进行简单的优势与风险对比。
+    
+    请严格返回如下 JSON 格式：
+    {
+      "summary": "一句话结论",
+      "keyUpdates": ["进展1", "进展2"],
+      "risks": [{"risk": "风险点", "impact": "影响分析"}],
+      "opportunities": ["机会点1"],
+      "nextActions": [{"who": "执行人", "what": "内容", "when": "时间"}],
+      "resourceRequests": [{"resource": "所需资源", "reason": "理由"}],
+      "strategicImplication": "战略意义深度洞察",
+      "stakeholderMapping": {
+        "currentLandscape": ["格局描述1", "格局描述2"],
+        "competitorAnalysis": {
+          "competitorName": "对手名/无",
+          "theirStrengths": ["对手优势1"],
+          "theirRisks": ["对手弱点1"]
+        }
+      },
+      "winningStrategy": "针对性的赢单策略建议"
+    }
+
+    互动历史：
+    ${JSON.stringify(interactions)}
+    
+    项目背景：
+    ${JSON.stringify(clientContext)}
+  `;
+  const response = await callLLM(prompt, { json: true });
+  return typeof response === 'string' ? JSON.parse(response) : response;
 };
 
 export const evolveAgentCapability = async (proposal: any, existingSkills: any) => {
@@ -200,4 +244,23 @@ export const evaluateEvolutionProposal = async (userInput: any) => {
 
   const response = await callLLM(prompt, { json: true });
   return typeof response === 'string' ? JSON.parse(response) : response;
+};
+
+export const generateRealtimeInputSuggestion = async (inputText: string, clientContext?: any) => {
+  if (!inputText || inputText.length < 5) return null;
+  
+  const prompt = `
+    你是一个资深的 CRM 战略助手。用户正在输入一段关于客户 "${clientContext?.name || '未知'}" 的沟通记录或咨询。
+    
+    【输入内容】：
+    "${inputText}"
+    
+    【任务】：
+    请提供一个非常简短（50字以内）的“即时建议”或“回复策略建议”。
+    注意：要显得专业且富有洞察力。如果文字太短无法判断，请返回 "正在倾听并分析事实..."。
+    
+    仅返回纯文本建议。
+  `;
+  
+  return await callLLM(prompt);
 };

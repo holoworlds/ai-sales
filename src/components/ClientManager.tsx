@@ -61,7 +61,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
   const handleExportExcel = () => {
     const data = clients.map(c => ({
       '客户名称': c.company,
-      '推动人': c.promoter || '',
+      '推动人': c.promoter || c.name || '',
       '推动部门': c.promoterDept || '',
       '关键人（拍板/影响者）': c.keyPerson || '',
       '群体会议': c.groupMeeting || '',
@@ -197,6 +197,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     try {
       await localDb.add('clients', {
         ...newClient,
+        promoter: newClient.name, // Ensure promoter is synced from name on creation
         stage: 'phase_0' as ClientStage,
         ownerId: user.uid,
         nextActionSuggestion: '正在为您初始化战术建议...',
@@ -541,7 +542,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
                    value={logContent}
                    onChange={e => setLogContent(e.target.value)}
                    placeholder="粘贴会议纪要、聊天记录或邮件摘要..."
-                   className="w-full h-48 bg-gray-50 border border-gray-100 rounded-2xl p-5 text-sm focus:bg-white focus:border-blue-600 outline-none transition-all resize-none shadow-inner"
+                   className="w-full h-[285px] bg-gray-50 border border-gray-100 rounded-2xl p-5 text-sm focus:bg-white focus:border-blue-600 outline-none transition-all resize-none shadow-inner"
                  />
                  <button 
                    onClick={handleQuickLog}
@@ -596,7 +597,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">核心决策者</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">推动人</label>
                     <input 
                       required type="text" value={newClient.name}
                       onChange={e => setNewClient({...newClient, name: e.target.value})}

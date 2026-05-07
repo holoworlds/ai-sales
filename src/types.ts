@@ -60,12 +60,14 @@ export interface Client {
 export interface Interaction {
   id: string;
   clientId: string;
-  type: 'chat' | 'email' | 'meeting' | 'call';
+  type: 'chat' | 'email' | 'meeting' | 'call' | 'note';
   content: string;
   aiReplySuggestion?: string;
   feedback?: string;
   timestamp: any;
   authorId: string;
+  processed?: boolean;
+  replyToId?: string;
 }
 
 export interface ContentAsset {
@@ -74,6 +76,25 @@ export interface ContentAsset {
   title: string;
   type: 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing';
   body: string;
+  rawInput?: string;
+  briefingData?: {
+    summary: string;
+    keyUpdates: string[];
+    risks: Array<{ risk: string; impact: string }>;
+    opportunities: string[];
+    nextActions: Array<{ who: string; what: string; when: string }>;
+    resourceRequests: Array<{ resource: string; reason: string }>;
+    stakeholderMapping: {
+      currentLandscape: string[];
+      competitorAnalysis?: {
+        competitorName: string;
+        theirStrengths: string[];
+        theirRisks: string[];
+      };
+    };
+    winningStrategy: string;
+    strategicImplication: string;
+  };
   ownerId: string;
   createdAt: any;
 }
