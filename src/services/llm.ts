@@ -27,6 +27,11 @@ export const getActiveModel = async () => {
     return config ? config.modelId : "gemini-3-flash-preview";
 };
 
+const cleanUrl = (url: string) => {
+  if (!url) return '';
+  return url.replace(/\/+$/, '');
+};
+
 export const callLLM = async (prompt: string, options: { json?: boolean, systemInstruction?: string } = {}) => {
   const config = await getActiveConfig();
   
@@ -34,56 +39,93 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
     throw new Error('未配置有效的模型');
   }
 
+  console.log(`[LLM] Calling ${config.provider} with model ${config.modelId}`);
+
   if (config.provider === LLMProvider.GOOGLE) {
     const apiKey = config.apiKey || (process.env as any).GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('未找到有效的 Google Gemini API Key');
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    
-    // Use the correct pattern: ai.models.generateContent
-    const response = await ai.models.generateContent({
-      model: config.modelId || 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: options.systemInstruction,
-        responseMimeType: options.json ? 'application/json' : undefined
-      }
-    });
+    try {
+      const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1beta' });
+      
+      const response = await ai.models.generateContent({
+        model: config.modelId || 'gemini-1.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: options.systemInstruction,
+          responseMimeType: options.json ? 'application/json' : undefined
+        }
+      });
 
-    return response.text;
+      // Newer GenAI SDK might return nested text or response object
+      let text = '';
+      if (typeof (response as any).text === 'function') {
+        text = (response as any).text();
+      } else if (typeof response.text === 'string') {
+        text = response.text;
+      } else if ((response as any).response?.text) {
+        text = (response as any).response.text();
+      }
+
+      if (!text) {
+        console.warn('[LLM] Gemini returned empty response', response);
+        return '';
+      }
+
+      return text;
+    } catch (error) {
+      console.error('[LLM] Gemini Error:', error);
+      throw error;
+    }
   } else {
     // OpenAI Compatible APIs (OpenAI, Deepseek, Kimi, etc.)
-    const baseUrl = config.baseUrl || 
+    const baseUrl = cleanUrl(config.baseUrl) || 
         (config.provider === LLMProvider.OPENAI ? 'https://api.openai.com/v1' : 
          config.provider === LLMProvider.DEEPSEEK ? 'https://api.deepseek.com' :
          config.provider === LLMProvider.KIMI ? 'https://api.moonshot.cn/v1' : '');
 
     if (!baseUrl) throw new Error(`未指定供应商 ${config.provider} 的 Base URL`);
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.modelId,
-        messages: [
-          ...(options.systemInstruction ? [{ role: 'system', content: options.systemInstruction }] : []),
-          { role: 'user', content: prompt }
-        ],
-        response_format: options.json ? { type: "json_object" } : undefined
-      })
-    });
+    // Ensure Deepseek uses /v1 if needed or just handle it gracefully
+    // Note: Official Deepseek is https://api.deepseek.com
+    const endpoint = `${baseUrl}/chat/completions`;
+    console.log(`[LLM] Requesting ${endpoint}`);
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || '请求 LLM 失败');
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: config.modelId,
+          messages: [
+            ...(options.systemInstruction ? [{ role: 'system', content: options.systemInstruction }] : []),
+            { role: 'user', content: prompt }
+          ],
+          response_format: options.json ? { type: "json_object" } : undefined,
+          temperature: 0.7,
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: { message: response.statusText } }));
+        console.error('[LLM] HTTP Error:', response.status, err);
+        throw new Error(err.error?.message || `请求 LLM 失败 (${response.status})`);
+      }
+
+      const data = await response.json();
+      if (!data.choices?.[0]?.message?.content) {
+        console.warn('[LLM] Provider returned empty content', data);
+        return '';
+      }
+      return data.choices[0].message.content;
+    } catch (error) {
+      console.error(`[LLM] ${config.provider} Error:`, error);
+      throw error;
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content;
   }
 };

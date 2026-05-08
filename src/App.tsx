@@ -25,20 +25,43 @@ type View = 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey';
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<View>('dashboard');
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const saved = localStorage.getItem('nexus_current_view');
+    return (saved as View) || 'dashboard';
+  });
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(() => {
+    return localStorage.getItem('nexus_selected_client_id');
+  });
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
+    localStorage.setItem('nexus_current_view', currentView);
+  }, [currentView]);
+
+  useEffect(() => {
+    if (selectedClientId) {
+      localStorage.setItem('nexus_selected_client_id', selectedClientId);
+    } else {
+      localStorage.removeItem('nexus_selected_client_id');
+    }
+  }, [selectedClientId]);
+
+  useEffect(() => {
     const handleError = (error: ErrorEvent) => {
       console.error('App Runtime Error:', error);
-      setHasError(true);
+      // Capture error details for the user
+      const errorMsg = error.error?.message || error.message || 'Unknown Error';
+      setHasError(errorMsg as any);
     };
 
     window.addEventListener('error', handleError);
     return () => window.removeEventListener('error', handleError);
   }, []);
+
+  useEffect(() => {
+    console.log(`[Nav] View changed to: ${currentView}`);
+  }, [currentView]);
 
   useEffect(() => {
     // Async local auth check
@@ -142,7 +165,12 @@ export default function App() {
       <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
         <X className="w-16 h-16 text-red-500 mb-4" />
         <h2 className="text-2xl font-bold mb-2">系统遇到一个关键性错误</h2>
-        <p className="text-gray-500 mb-6 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
+        <p className="text-gray-500 mb-4 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
+        <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-6 max-w-md w-full">
+           <p className="text-[10px] font-mono text-red-600 break-words line-clamp-4">
+             {typeof hasError === 'string' ? hasError : '发生未知渲染错误'}
+           </p>
+        </div>
         <button 
           onClick={() => window.location.reload()}
           className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs"

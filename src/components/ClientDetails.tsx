@@ -463,7 +463,10 @@ ${result.winningStrategy}
         Interactions: ${interactions.map(i => i.content).join('\n')}
       `;
       const result = await consultClientStrategy(userMsg, context);
-      setConsultHistory(prev => [...prev, { role: 'ai', content: result.reply }]);
+      setConsultHistory(prev => [...prev, { 
+        role: 'ai', 
+        content: result?.reply || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。') 
+      }]);
 
       if (result.suggestedUpdates) {
         // AI suggests updating client profile based on discussion
@@ -1256,12 +1259,18 @@ ${result.winningStrategy}
                                   </div>
                                 )}
                                 <div className="prose-sm max-w-none">
-                                  <ReactMarkdown>{i.content}</ReactMarkdown>
+                                  <ReactMarkdown>{i.content || ''}</ReactMarkdown>
                                 </div>
                               </div>
                               <div className={`mt-3 flex items-center gap-4 px-2 ${i.authorId === localAuth.getCurrentUser()?.uid ? 'justify-end' : ''}`}>
                                 <div className="text-[8px] font-black uppercase text-gray-300 tracking-widest">
-                                  {i.timestamp ? (typeof i.timestamp === 'string' ? new Date(i.timestamp).toLocaleTimeString() : i.timestamp.toDate ? i.timestamp.toDate().toLocaleTimeString() : i.timestamp.toLocaleTimeString()) : '处理中'}
+                                  {i.timestamp ? (
+                                    typeof i.timestamp === 'string' 
+                                      ? new Date(i.timestamp).toLocaleTimeString() 
+                                      : (i.timestamp as any).toDate 
+                                        ? (i.timestamp as any).toDate().toLocaleTimeString() 
+                                        : new Date(i.timestamp as any).toLocaleTimeString()
+                                  ) : '处理中'}
                                 </div>
                                 {i.authorId === localAuth.getCurrentUser()?.uid && (
                                   <button 
@@ -1444,7 +1453,7 @@ ${result.winningStrategy}
                             : 'bg-gray-50 text-gray-900 border border-gray-100 rounded-tl-none'
                         }`}>
                           <div className="text-sm leading-relaxed prose-sm">
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
                           </div>
                         </div>
                       </div>

@@ -78,6 +78,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     isPrimary: false
   });
 
+  const [selectedSkill, setSelectedSkill] = useState<AgentSkill | null>(null);
+  const [selectedProposal, setSelectedProposal] = useState<EvolutionProposal | null>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -99,7 +102,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   };
 
   const getActiveModel = () => {
-     return llmConfigs.find(c => c.isPrimary)?.modelId || 'gemini-2.0-flash-exp';
+     return llmConfigs.find(c => c.isPrimary)?.modelId || 'gemini-3-flash-preview';
   };
 
   const setActiveModel = async (modelId: string) => {
@@ -169,9 +172,20 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         queryText,
         { clients, knowledge, skills }
       );
-      setReasoningResult(result);
-      if (result.suggestedSystemAction) {
-        setPendingAction(result.suggestedSystemAction);
+      
+      if (result?.error) {
+        setReasoningResult({
+          decision: '推理失败',
+          analysis: result.message || 'AI 暂时无法处理该指令',
+          recommendedAction: '请尝试简化指令或稍后再试',
+          generatedMessage: '系统错误',
+          confidence: 0
+        } as any);
+      } else {
+        setReasoningResult(result);
+        if (result?.suggestedSystemAction) {
+          setPendingAction(result.suggestedSystemAction);
+        }
       }
       setQueryText('');
       
@@ -421,19 +435,19 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                           <span className="text-[11px] font-black uppercase tracking-[0.2em]">Layer 3: 深度决策推理</span>
                                        </div>
                                        <div className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[9px] font-black uppercase">
-                                          Confidence: {Math.round(reasoningResult.confidence * 100)}%
+                                          Confidence: {Math.round((reasoningResult?.confidence || 0) * 100)}%
                                        </div>
                                     </div>
-                                    <h4 className="text-xl font-bold mb-4 leading-tight">{reasoningResult.decision}</h4>
-                                    <p className="text-gray-400 text-sm leading-relaxed mb-10">{reasoningResult.analysis}</p>
+                                    <h4 className="text-xl font-bold mb-4 leading-tight">{reasoningResult?.decision}</h4>
+                                    <p className="text-gray-400 text-sm leading-relaxed mb-10">{reasoningResult?.analysis}</p>
                                     
                                     <div className="bg-blue-600 p-8 rounded-3xl shadow-xl shadow-blue-600/20">
                                        <div className="flex items-center gap-2 text-[9px] font-black uppercase text-white/50 tracking-widest mb-4">
                                           <Zap className="w-3 h-3" /> 认知驱动行动建议
                                        </div>
-                                       <div className="text-lg font-bold text-white mb-6 leading-tight">{reasoningResult.recommendedAction}</div>
+                                       <div className="text-lg font-bold text-white mb-6 leading-tight">{reasoningResult?.recommendedAction}</div>
                                        <div className="p-5 bg-white/10 rounded-2xl border border-white/10 text-sm font-medium leading-relaxed italic text-white/90">
-                                          "{reasoningResult.generatedMessage}"
+                                          "{reasoningResult?.generatedMessage}"
                                        </div>
                                     </div>
 
@@ -594,19 +608,48 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
               {activeTab === 'skills' && (
                 <motion.div key="skills" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
-                   <h2 className="text-3xl font-bold tracking-tight">Layer 4: 能力系统</h2>
+                   <h2 className="text-3xl font-bold tracking-tight text-gray-900 italic">Layer 4: 认知能力集</h2>
                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {skills.map(skill => (
-                        <div key={skill.id} className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] relative group hover:bg-white/10 transition-all">
-                           <Workflow className="w-6 h-6 text-gray-700 mb-4 group-hover:text-indigo-400 transition-colors" />
-                           <h4 className="text-lg font-bold mb-3">{skill.name}</h4>
-                           <p className="text-xs text-gray-500 mb-6">{skill.description}</p>
-                           <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-                              <div className="h-full bg-indigo-500" style={{ width: `${skill.performanceScore * 100}%` }} />
+                        <div 
+                          key={skill.id} 
+                          onClick={() => setSelectedSkill(skill)}
+                          className="bg-[#1A1C1E] border border-white/10 p-8 rounded-[2.5rem] relative group hover:border-indigo-500/30 transition-all cursor-pointer shadow-xl shadow-indigo-500/5"
+                        >
+                           <div className="flex justify-between items-start mb-4">
+                              <Workflow className="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform" />
+                              <div className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Usage: {skill.usageCount || 0}</div>
+                           </div>
+                            <h4 className="text-lg font-bold mb-3 group-hover:text-indigo-300 text-white transition-colors uppercase tracking-tight">
+                               {skill.name || '未命名能力'}
+                            </h4>
+                            <div className="flex gap-2 flex-wrap mb-4">
+                               <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 text-[8px] font-black uppercase rounded border border-indigo-500/30">
+                                  {skill.type || 'Core'}
+                               </span>
+                               <span className="px-1.5 py-0.5 bg-white/10 text-gray-400 text-[8px] font-bold uppercase rounded border border-white/10">
+                                  v{(skill.usageCount || 0) > 10 ? '2.1' : '1.0'}
+                               </span>
+                            </div>
+                            <p className="text-[11px] text-gray-400 mb-6 leading-relaxed line-clamp-3 group-hover:text-gray-300 transition-colors">
+                               {skill.description || '该能力暂无详细描述，系统正在自动完善中...'}
+                            </p>
+                           <div className="space-y-2">
+                              <div className="flex justify-between items-center text-[9px] font-black uppercase text-gray-500">
+                                 <span>Performance</span>
+                                 <span>{Math.round(skill.performanceScore * 100)}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                                 <motion.div 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${skill.performanceScore * 100}%` }}
+                                    className="h-full bg-indigo-500"
+                                 />
+                              </div>
                            </div>
                         </div>
                       ))}
-                      <button 
+                       <button 
                         onClick={() => setIsAddingProposal(true)}
                         className="border-2 border-dashed border-white/10 p-8 rounded-[2.5rem] flex flex-col items-center justify-center text-gray-600 hover:border-indigo-500 hover:text-indigo-400 transition-all gap-4"
                       >
@@ -627,20 +670,40 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                    </div>
                    <div className="space-y-6 pb-20">
                       {proposals.length === 0 ? (
-                        <div className="py-20 text-center opacity-30"><Lightbulb className="w-12 h-12 mx-auto mb-4" /><p className="text-[10px] font-black uppercase tracking-widest">暂无进化提案</p></div>
+                        <div className="py-20 text-center opacity-30">
+                          <Lightbulb className="w-12 h-12 mx-auto mb-4" />
+                          <p className="text-[10px] font-black uppercase tracking-widest">暂无进化提案</p>
+                        </div>
                       ) : (
                         proposals.map(proposal => (
-                          <div key={proposal.id} className="bg-white/5 border border-white/10 p-10 rounded-[3rem] grid grid-cols-1 lg:grid-cols-4 gap-10">
+                          <div 
+                            key={proposal.id} 
+                            onClick={() => setSelectedProposal(proposal)}
+                            className="bg-white/5 border border-white/10 p-10 rounded-[3rem] grid grid-cols-1 lg:grid-cols-4 gap-10 hover:bg-white/10 transition-all cursor-pointer group"
+                          >
                              <div className="lg:col-span-3 space-y-6">
                                 <div className="flex items-center gap-4">
                                    <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase border ${proposal.status === 'pending' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>{proposal.status}</div>
                                    {proposal.isManual && <div className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full text-[9px] font-black uppercase">Human Inject</div>}
                                 </div>
-                                <h4 className="text-xl font-bold text-emerald-400">「{proposal.suggestedSkillName}」</h4>
-                                <p className="text-sm text-gray-400 leading-relaxed">{proposal.suggestedSkillDescription}</p>
-                                {proposal.evaluation && <div className="p-5 bg-blue-600/5 rounded-2xl text-xs text-gray-400 italic">“{proposal.evaluation}”</div>}
+                                <h4 className="text-xl font-bold text-emerald-400 group-hover:translate-x-2 transition-transform tracking-tight flex items-center gap-3">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    「{proposal.suggestedSkillName}」
+                                 </h4>
+                                <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{proposal.suggestedSkillDescription}</p>
+                                {proposal.evaluation && <div className="p-5 bg-blue-600/5 rounded-2xl text-xs text-gray-400 italic mb-2">“{proposal.evaluation}”</div>}
+                                <div className="grid grid-cols-2 gap-4">
+                                   <div className="text-[10px] text-gray-600">
+                                      <span className="font-black uppercase mr-2 text-emerald-500/50">Problem:</span>
+                                      <span className="line-clamp-1 italic">{proposal.problem}</span>
+                                   </div>
+                                   <div className="text-[10px] text-gray-600">
+                                      <span className="font-black uppercase mr-2 text-blue-500/50">Capability:</span>
+                                      <span className="line-clamp-1 italic">{proposal.missingCapability}</span>
+                                   </div>
+                                </div>
                              </div>
-                             <div className="flex flex-col justify-center gap-4">
+                             <div className="flex flex-col justify-center gap-4" onClick={(e) => e.stopPropagation()}>
                                 {proposal.status === 'pending' && <button onClick={() => approveProposal(proposal)} className="w-full py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-700 transition-all">批准并集成</button>}
                                 {proposal.status === 'implemented' && <div className="text-center py-4 bg-emerald-500/10 text-emerald-400 rounded-2xl text-[10px] font-black uppercase">已集成至系统</div>}
                              </div>
@@ -739,6 +802,127 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         </div>
 
         <AnimatePresence>
+           {selectedSkill && (
+             <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-2xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
+                   <button onClick={() => setSelectedSkill(null)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
+                   
+                   <div className="flex items-center gap-6 mb-10">
+                      <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20">
+                         <Workflow className="w-8 h-8" />
+                      </div>
+                      <div>
+                         <h3 className="text-2xl font-bold">{selectedSkill.name}</h3>
+                         <div className="flex items-center gap-4 mt-2">
+                            <span className="text-[10px] font-black uppercase text-indigo-400 tracking-widest">{selectedSkill.type} Capability</span>
+                            <span className="text-[10px] font-black uppercase text-gray-600 tracking-widest">Usage: {selectedSkill.usageCount}</span>
+                         </div>
+                      </div>
+                   </div>
+
+                   <div className="space-y-8">
+                      <div>
+                         <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 block">能力描述 (Description)</label>
+                         <p className="text-sm text-gray-300 leading-relaxed">{selectedSkill.description}</p>
+                      </div>
+
+                      <div>
+                          <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 block">内置逻辑 (Internal Logic / Prompt)</label>
+                          <div className="bg-black/40 p-6 rounded-2xl font-mono text-xs text-indigo-300 border border-white/5 leading-relaxed">
+                             {selectedSkill.logic}
+                          </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-8">
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 block">适用阶段 (Applicable Phases)</label>
+                            <div className="flex flex-wrap gap-2">
+                               {(selectedSkill.applicablePhases || []).map(p => (
+                                 <span key={p} className="px-2 py-1 bg-white/5 rounded text-[9px] font-bold text-gray-400 uppercase">{p}</span>
+                               ))}
+                            </div>
+                         </div>
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 block">性能评分 (Performance)</label>
+                            <div className="flex items-center gap-4">
+                               <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                                  <div className="h-full bg-indigo-500" style={{ width: `${selectedSkill.performanceScore * 100}%` }} />
+                               </div>
+                               <span className="text-sm font-bold text-indigo-400">{Math.round(selectedSkill.performanceScore * 100)}%</span>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
+                </motion.div>
+             </div>
+           )}
+
+           {selectedProposal && (
+             <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-3xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
+                   <button onClick={() => setSelectedProposal(null)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
+                   
+                   <div className="flex items-center gap-6 mb-10">
+                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
+                         <Zap className="w-8 h-8" />
+                      </div>
+                      <div>
+                         <h3 className="text-2xl font-bold">{selectedProposal.suggestedSkillName}</h3>
+                         <div className="flex items-center gap-4 mt-2">
+                            <div className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${selectedProposal.status === 'pending' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{selectedProposal.status}</div>
+                            <span className="text-[10px] font-black uppercase text-gray-600 tracking-widest">Evolution Proposal</span>
+                         </div>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                      <div className="space-y-8">
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-3 block">发现的问题 (Observed Problem)</label>
+                            <p className="text-sm font-medium text-gray-300 leading-relaxed border-l-2 border-red-500/30 pl-4 bg-red-500/5 p-4 rounded-r-xl">{selectedProposal.problem}</p>
+                         </div>
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-3 block">缺少的的能力 (Missing Capability)</label>
+                            <p className="text-sm font-medium text-gray-300 leading-relaxed border-l-2 border-blue-500/30 pl-4 bg-blue-500/5 p-4 rounded-r-xl">{selectedProposal.missingCapability}</p>
+                         </div>
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-3 block">根本原因 (Root Cause)</label>
+                            <p className="text-sm font-medium text-gray-300 leading-relaxed border-l-2 border-indigo-500/30 pl-4 bg-indigo-500/5 p-4 rounded-r-xl">{selectedProposal.rootCause}</p>
+                         </div>
+                      </div>
+
+                      <div className="space-y-8">
+                         <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-3 block">建议的能力逻辑 (Suggested Logic)</label>
+                            <div className="bg-black/40 p-6 rounded-2xl font-mono text-[10px] text-emerald-300 border border-white/5 leading-relaxed h-[200px] overflow-y-auto no-scrollbar">
+                               {selectedProposal.suggestedSkillLogic}
+                            </div>
+                         </div>
+                         {selectedProposal.evaluation && (
+                            <div>
+                               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 block">AI 自评 (Evaluation)</label>
+                               <div className="p-5 bg-white/5 rounded-2xl text-xs text-gray-400 italic border border-white/5">
+                                  "{selectedProposal.evaluation}"
+                               </div>
+                            </div>
+                         )}
+                         {selectedProposal.status === 'pending' && (
+                           <button 
+                             onClick={() => {
+                               approveProposal(selectedProposal);
+                               setSelectedProposal(null);
+                             }}
+                             className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 transition-all active:scale-95"
+                           >
+                              批准并立即集成
+                           </button>
+                         )}
+                      </div>
+                   </div>
+                </motion.div>
+             </div>
+           )}
+
            {isAddingLLM && (
              <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
                 <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-xl relative p-12 text-white shadow-2xl">
@@ -772,7 +956,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                            </select>
                          </div>
                          <div className="space-y-2">
-                           <label className="text-[10px) font-black uppercase text-gray-500 px-2">模型标识符 (Model ID)</label>
+                           <label className="text-[10px] font-black uppercase text-gray-500 px-2">模型标识符 (Model ID)</label>
                            <input required value={newLLM.modelId} onChange={e => setNewLLM({...newLLM, modelId: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-orange-500" placeholder="例如：moonshot-v1-8k" />
                          </div>
                        </div>

@@ -30,6 +30,31 @@ export const generateContentAsset = async (type: string, clientInfo: string, req
   return await callLLM(prompt);
 };
 
+const safeJsonParse = (text: string) => {
+  try {
+    // Attempt to clean markdown json blocks if present
+    let cleaned = text.trim();
+    if (cleaned.includes('```')) {
+      const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match) cleaned = match[1];
+    }
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error('[Gemini Service] JSON Parse Error:', e, 'Raw text:', text);
+    // Try a more aggressive extraction
+    try {
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        return JSON.parse(text.substring(firstBrace, lastBrace + 1));
+      }
+    } catch (e2) {
+      console.error('[Gemini Service] Aggressive Parse Error:', e2);
+    }
+    return { error: true, message: '数据解析失败' };
+  }
+};
+
 export const analyzeClientStage = async (interactions: string) => {
   const prompt = `
     你是一个资深的B2B大客户销售专家和战略顾问。请根据提供的客户互动历史和项目情报（Briefings），深度审计该客户的项目状态。
@@ -95,7 +120,7 @@ export const analyzeClientStage = async (interactions: string) => {
   `;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const consultClientStrategy = async (discussion: string, clientContext: string) => {
@@ -119,7 +144,7 @@ export const consultClientStrategy = async (discussion: string, clientContext: s
   `;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const generateIntegratedStrategicInsight = async (
@@ -139,7 +164,7 @@ export const generateIntegratedStrategicInsight = async (
   `;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const getStrategicAdvice = async (query: string, context: any) => {
@@ -153,7 +178,7 @@ export const getStrategicAdvice = async (query: string, context: any) => {
   `;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const queryKnowledgeBase = async (query: string, context: string) => {
@@ -167,7 +192,7 @@ export const extractKnowledgeInsights = async (content: string) => {
   内容: ${content}`;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const performStrategicAgentReasoning = async (queryText: string, context: any) => {
@@ -175,7 +200,7 @@ export const performStrategicAgentReasoning = async (queryText: string, context:
   返回 JSON：{ "analysis": "分析", "decision": "决策", "recommendedAction": "建议", "generatedMessage": "消息", "usedSkills": [], "confidence": 0.9, "suggestedSystemAction": { "type": "UPDATE_CLIENT", "data": {}, "reasoning": "理由" } }`;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const generateStrategicPrompt = async (requirements: string, context?: any) => {
@@ -190,7 +215,8 @@ export const generateClientJourney = async (clientInfo: any, interactions?: any,
   客户：${JSON.stringify(clientInfo)}
   互动：${JSON.stringify(interactions)}
   知识：${JSON.stringify(knowledge)}`;
-  return await callLLM(prompt, { json: true });
+  const response = await callLLM(prompt, { json: true });
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const generateMeetingIntelligence = async (interactions: any, clientContext?: any) => {
@@ -225,17 +251,17 @@ export const generateMeetingIntelligence = async (interactions: any, clientConte
     互动历史：
     ${JSON.stringify(interactions)}
     
-    项目背景：
+    互动背景：
     ${JSON.stringify(clientContext)}
   `;
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const evolveAgentCapability = async (proposal: any, existingSkills: any) => {
    const prompt = `根据提案执行能力进化。提案：${JSON.stringify(proposal)}。现有能力：${JSON.stringify(existingSkills)}`;
    const res = await callLLM(prompt, { json: true });
-   return typeof res === 'string' ? JSON.parse(res) : res;
+   return typeof res === 'string' ? safeJsonParse(res) : res;
 };
 
 export const evaluateEvolutionProposal = async (userInput: any) => {
@@ -243,7 +269,7 @@ export const evaluateEvolutionProposal = async (userInput: any) => {
   返回 JSON: { "isAccepted": true, "evaluation": "评价", "refinedProposal": {}, "tags": [] }`;
 
   const response = await callLLM(prompt, { json: true });
-  return typeof response === 'string' ? JSON.parse(response) : response;
+  return typeof response === 'string' ? safeJsonParse(response) : response;
 };
 
 export const generateRealtimeInputSuggestion = async (inputText: string, clientContext?: any) => {
