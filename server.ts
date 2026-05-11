@@ -39,48 +39,73 @@ async function startServer() {
   };
 
   const writeData = async (collection: string, data: any[]) => {
-    const filePath = getFilePath(collection);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    try {
+      const filePath = getFilePath(collection);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Failed to write data to ${collection}:`, err);
+      throw err; // Re-throw to be caught by the route handler
+    }
   };
 
   // --- Database API ---
   app.get('/api/db/*', async (req, res) => {
-    const collection = req.params[0];
-    const data = await readData(collection);
-    res.json(data);
+    try {
+      const collection = req.params[0];
+      const data = await readData(collection);
+      res.json(data);
+    } catch (err) {
+      console.error('GET DB error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   });
 
   app.post('/api/db/*', async (req, res) => {
-    const collection = req.params[0];
-    const items = await readData(collection);
-    const newItem = req.body;
-    items.push(newItem);
-    await writeData(collection, items);
-    res.status(201).json(newItem);
+    try {
+      const collection = req.params[0];
+      const items = await readData(collection);
+      const newItem = req.body;
+      items.push(newItem);
+      await writeData(collection, items);
+      res.status(201).json(newItem);
+    } catch (err) {
+      console.error('POST DB error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   });
 
   app.put('/api/db/*/:id', async (req, res) => {
-    const collection = req.params[0]; 
-    const id = req.params.id;
-    const items = await readData(collection);
-    const index = items.findIndex((i: any) => i.id === id);
-    if (index !== -1) {
-      items[index] = { ...items[index], ...req.body };
-      await writeData(collection, items);
-      res.json(items[index]);
-    } else {
-      res.status(404).json({ error: 'Not found' });
+    try {
+      const collection = req.params[0]; 
+      const id = req.params.id;
+      const items = await readData(collection);
+      const index = items.findIndex((i: any) => i.id === id);
+      if (index !== -1) {
+        items[index] = { ...items[index], ...req.body };
+        await writeData(collection, items);
+        res.json(items[index]);
+      } else {
+        res.status(404).json({ error: 'Not found' });
+      }
+    } catch (err) {
+      console.error('PUT DB error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
   });
 
   app.delete('/api/db/*/:id', async (req, res) => {
-    const collection = req.params[0];
-    const id = req.params.id;
-    const items = await readData(collection);
-    const filtered = items.filter((i: any) => i.id !== id);
-    await writeData(collection, filtered);
-    res.status(204).end();
+    try {
+      const collection = req.params[0];
+      const id = req.params.id;
+      const items = await readData(collection);
+      const filtered = items.filter((i: any) => i.id !== id);
+      await writeData(collection, filtered);
+      res.status(204).end();
+    } catch (err) {
+      console.error('DELETE DB error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   });
 
   // --- Auth ---
@@ -93,6 +118,10 @@ async function startServer() {
        await fs.writeFile(path.join(DATA_DIR, 'user_identity.json'), JSON.stringify(defaultUser, null, 2));
        res.json(defaultUser);
      }
+  });
+  
+  app.post('/api/auth/logout', (req, res) => {
+    res.json({ status: 'ok' });
   });
 
   // Vite middleware for development
@@ -116,4 +145,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Critical Server Failure:", err);
+  process.exit(1);
+});

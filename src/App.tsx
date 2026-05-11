@@ -151,8 +151,14 @@ export default function App() {
     }
   };
 
-  const logoutLocal = () => {
-    setUser(null);
+  const logoutLocal = async () => {
+    try {
+      await localAuth.logout();
+      setUser(null);
+    } catch (err) {
+      console.error("Logout error:", err);
+      setUser(null);
+    }
   };
 
   if (loading) {

@@ -124,18 +124,18 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   // Real-time suggestion effect
   useEffect(() => {
     const timer = setTimeout(async () => {
-      if (newInteraction.trim().length > 10) {
-        setIsSuggesting(true);
-        try {
+      try {
+        if (newInteraction.trim().length > 10) {
+          setIsSuggesting(true);
           const suggestion = await generateRealtimeInputSuggestion(newInteraction, client);
           setDebouncedSuggestion(suggestion ? String(suggestion) : null);
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setIsSuggesting(false);
+        } else {
+          setDebouncedSuggestion(null);
         }
-      } else {
-        setDebouncedSuggestion(null);
+      } catch (err) {
+        console.error("[ClientDetails] Suggestion Error:", err);
+      } finally {
+        setIsSuggesting(false);
       }
     }, 1000);
 
@@ -176,7 +176,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   }, [client?.id]);
 
   useEffect(() => {
-    fetchData();
+    fetchData().catch(err => console.error("[ClientDetails] Initial fetchData failed:", err));
   }, [fetchData]);
 
   const handleGenerateReply = async () => {
@@ -319,6 +319,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
       await fetchData();
     } catch (err) {
       console.error(err);
+      setError("更新互动状态失败");
     }
   };
 
@@ -528,6 +529,7 @@ ${result.winningStrategy}
       setIsEditing(false);
     } catch (error) {
       console.error(error);
+      setError("保存档案失败");
     }
   };
 
@@ -548,6 +550,7 @@ ${result.winningStrategy}
       await fetchData();
     } catch (error) {
       console.error(error);
+      setError("更新类别评分失败");
     }
   };
 
@@ -575,6 +578,7 @@ ${result.winningStrategy}
       fetchData();
     } catch (error) {
       console.error(error);
+      setError("更新细分项评分失败");
     }
   };
 

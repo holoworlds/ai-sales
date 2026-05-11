@@ -34,6 +34,7 @@ interface ClientManagerProps {
 export default function ClientManager({ initialClientId, onClientClear }: ClientManagerProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [_error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
@@ -94,11 +95,12 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     } catch (error) {
       console.error("[ClientManager] fetchData error:", error);
       setLoading(false);
+      setError("数据加载失败");
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData().catch(err => console.error("[ClientManager] Initial fetchData failed:", err));
   }, []);
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,37 +113,37 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
 
       const reader = new FileReader();
       reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const rawData: any[] = XLSX.utils.sheet_to_json(ws);
+        try {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const rawData: any[] = XLSX.utils.sheet_to_json(ws);
 
-        if (rawData.length === 0) {
-          alert('Excel 文件中没有数据');
-          return;
-        }
+          if (rawData.length === 0) {
+            alert('Excel 文件中没有数据');
+            return;
+          }
 
-        const headerMap: { [key: string]: string } = {
-          '客户名称': 'company',
-          '公司': 'company',
-          '企业': 'company',
-          '推动人': 'promoter',
-          '联系人': 'name',
-          '关键人': 'keyPerson',
-          '产品': 'product',
-          '规模': 'scale',
-          '项目评分': 'projectScore',
-          '当前阶段': 'stage',
-          '阶段': 'stage',
-          '阻力点': 'resistancePoint',
-          '进展': 'progress',
-          '下一步行动建议': 'nextActionSuggestion',
-          '缺什么材料': 'missingMaterials'
-        };
+          const headerMap: { [key: string]: string } = {
+            '客户名称': 'company',
+            '公司': 'company',
+            '企业': 'company',
+            '推动人': 'promoter',
+            '联系人': 'name',
+            '关键人': 'keyPerson',
+            '产品': 'product',
+            '规模': 'scale',
+            '项目评分': 'projectScore',
+            '当前阶段': 'stage',
+            '阶段': 'stage',
+            '阻力点': 'resistancePoint',
+            '进展': 'progress',
+            '下一步行动建议': 'nextActionSuggestion',
+            '缺什么材料': 'missingMaterials'
+          };
 
-        let importedCount = 0;
+          let importedCount = 0;
 
           for (const row of rawData) {
             const processedRow: any = {};
@@ -187,12 +189,12 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
             importedCount++;
           }
           await fetchData();
-        alert(`导入完成：共成功导入 ${importedCount} 条记录`);
-      } catch (err) {
-        console.error("Import error:", err);
-        alert('导入过程中出现错误，请检查文件格式');
-      }
-    };
+          alert(`导入完成：共成功导入 ${importedCount} 条记录`);
+        } catch (err) {
+          console.error("[ClientManager] Import error:", err);
+          alert('导入过程中出现错误，请检查文件格式');
+        }
+      };
       reader.readAsBinaryString(file);
       e.target.value = ''; // Reset input
     } catch (err) {

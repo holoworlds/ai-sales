@@ -364,20 +364,25 @@ export const evaluateEvolutionProposal = async (userInput: any) => {
 };
 
 export const generateRealtimeInputSuggestion = async (inputText: string, clientContext?: any) => {
-  if (!inputText || inputText.length < 5) return null;
-  
-  const prompt = `
-    你是一个资深的 CRM 战略助手。用户正在输入一段关于客户 "${clientContext?.name || '未知'}" 的沟通记录或咨询。
+  try {
+    if (!inputText || inputText.length < 5) return null;
     
-    【输入内容】：
-    "${inputText}"
+    const prompt = `
+      你是一个资深的 CRM 战略助手。用户正在输入一段关于客户 "${clientContext?.name || '未知'}" 的沟通记录或咨询。
+      
+      【输入内容】：
+      "${inputText}"
+      
+      【任务】：
+      请提供一个非常简短（50字以内）的“即时建议”或“回复策略建议”。
+      注意：要显得专业且富有洞察力。如果文字太短无法判断，请返回 "正在倾听并分析事实..."。
+      
+      仅返回纯文本建议。
+    `;
     
-    【任务】：
-    请提供一个非常简短（50字以内）的“即时建议”或“回复策略建议”。
-    注意：要显得专业且富有洞察力。如果文字太短无法判断，请返回 "正在倾听并分析事实..."。
-    
-    仅返回纯文本建议。
-  `;
-  
-  return await callLLM(prompt);
+    return await callLLM(prompt);
+  } catch (error) {
+    console.error('[Gemini Service] generateRealtimeInputSuggestion Error:', error);
+    return null;
+  }
 };

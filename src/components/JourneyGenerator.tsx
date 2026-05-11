@@ -41,7 +41,8 @@ export default function JourneyGenerator() {
       console.log('[JourneyGenerator] Sanitized AI Insight:', sanitized);
       setInsight(sanitized);
     } catch (err) {
-      console.error(err);
+      console.error("[JourneyGenerator] synthesize error:", err);
+      // Optional: set an error state if the UI needs it
     } finally {
       setGenerating(false);
     }

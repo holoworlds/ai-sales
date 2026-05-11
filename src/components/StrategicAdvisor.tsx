@@ -83,7 +83,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   const [selectedProposal, setSelectedProposal] = useState<EvolutionProposal | null>(null);
 
   useEffect(() => {
-    fetchData();
+    fetchData().catch(err => console.error("[StrategicAdvisor] Initial fetchData failed:", err));
   }, []);
 
   const fetchData = async () => {
@@ -103,6 +103,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setLlmConfigs(configsData);
     } catch (error) {
       console.error("[StrategicAdvisor] fetchData error:", error);
+      setError("从数据库读取数据失败，请重试。");
     }
   };
 
@@ -122,6 +123,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setLlmConfigs(updated);
     } catch (error) {
       console.error("[StrategicAdvisor] setActiveModel error:", error);
+      setError("设置主模型失败");
     }
   };
 
@@ -137,6 +139,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setLlmConfigs(updated);
     } catch (error) {
       console.error("[StrategicAdvisor] setPrimaryModel error:", error);
+      setError("设置主模型失败");
     }
   };
 
@@ -168,6 +171,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       });
     } catch (error) {
       console.error("[StrategicAdvisor] handleAddLLM error:", error);
+      setError("添加模型配置失败");
     }
   };
 
@@ -177,6 +181,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setLlmConfigs(llmConfigs.filter(c => c.id !== id));
     } catch (error) {
       console.error("[StrategicAdvisor] deleteLLM error:", error);
+      setError("删除模型配置失败");
     }
   };
 
@@ -244,6 +249,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       await fetchData();
     } catch (err) {
       console.error("Action execution failed:", err);
+      setError("操作执行失败");
     } finally {
       setExecutingAction(false);
     }
@@ -309,6 +315,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       await fetchData();
     } catch (err) {
       console.error(err);
+      setError("能力集成失败");
     }
   };
 

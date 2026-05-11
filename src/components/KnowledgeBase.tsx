@@ -188,11 +188,12 @@ export default function KnowledgeBase() {
     } catch (error) {
       console.error("[KnowledgeBase] fetchData error:", error);
       setLoading(false);
+      // We could add an error state here if needed
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData().catch(err => console.error("[KnowledgeBase] Initial fetchData failed:", err));
   }, []);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -317,7 +318,7 @@ export default function KnowledgeBase() {
               setIsAdding(false);
             }, 2000);
           } catch (err) {
-            console.error(err);
+            console.error("[KnowledgeBase] Excel import error:", err);
             alert('Excel 解析失败');
           }
         };
@@ -326,15 +327,20 @@ export default function KnowledgeBase() {
         // Text or other files
         const reader = new FileReader();
         reader.onload = async (evt) => {
-          const text = evt.target?.result as string;
-          setNewEntry({
-            ...newEntry,
-            title: fileName.replace(/\.[^/.]+$/, ""),
-            content: text,
-            sourceType: fileExt === 'pdf' ? 'pdf' : 
-                        (fileExt === 'doc' || fileExt === 'docx' ? 'word' : 
-                        (fileExt === 'ppt' || fileExt === 'pptx' ? 'ppt' : 'document'))
-          });
+          try {
+            const text = evt.target?.result as string;
+            setNewEntry(prev => ({
+              ...prev,
+              title: fileName.replace(/\.[^/.]+$/, ""),
+              content: text,
+              sourceType: fileExt === 'pdf' ? 'pdf' : 
+                          (fileExt === 'doc' || fileExt === 'docx' ? 'word' : 
+                          (fileExt === 'ppt' || fileExt === 'pptx' ? 'ppt' : 'document'))
+            }));
+          } catch (err) {
+            console.error("[KnowledgeBase] File read processing error:", err);
+            alert('文件处理失败');
+          }
         };
         reader.readAsText(file);
       }

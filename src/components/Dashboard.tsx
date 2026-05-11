@@ -28,6 +28,7 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
   const [skillCount, setSkillCount] = useState(0);
   const [proposalCount, setProposalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [_error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -49,7 +50,10 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
         setLoading(false);
       }
     };
-    fetchStats();
+    fetchStats().catch(err => {
+      console.error("[Dashboard] Initial lifecycle fetchStats failed:", err);
+      setError("数据加载失败");
+    });
   }, []);
 
   const pendingActionsCount = clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).length;

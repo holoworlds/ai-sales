@@ -118,5 +118,14 @@ export const localAuth = {
     // Note: This is now a "stale" mock for parts of the app that expect sync access.
     // Ideally, the app should use a Provider or async pattern.
     return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
+  },
+  
+  logout: async () => {
+    try {
+      // Potentially clear server session if implemented
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
   }
 };
