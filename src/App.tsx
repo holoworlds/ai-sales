@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Component, ReactNode } from 'react';
 import { localAuth } from './services/storage';
 import { 
   LayoutDashboard, 
@@ -13,7 +13,7 @@ import {
   Bell,
   Cpu
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import Dashboard from './components/Dashboard';
 import StrategicAdvisor from './components/StrategicAdvisor';
 import ClientManager from './components/ClientManager';
@@ -21,6 +21,40 @@ import KnowledgeBase from './components/KnowledgeBase';
 import JourneyGenerator from './components/JourneyGenerator';
 
 type View = 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey';
+
+// Simplified Error Boundary for functional app structure
+class LocalErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Component Error Caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 bg-red-50 border border-red-100 rounded-2xl">
+          <h3 className="text-red-900 font-bold mb-2">组件渲染异常</h3>
+          <p className="text-red-700 text-sm mb-4">{this.state.error?.message || '未知错误'}</p>
+          <button 
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-bold"
+          >
+            重试该件
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -33,7 +67,7 @@ export default function App() {
     return localStorage.getItem('nexus_selected_client_id');
   });
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [hasError, setHasError] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem('nexus_current_view', currentView);
@@ -49,14 +83,41 @@ export default function App() {
 
   useEffect(() => {
     const handleError = (error: ErrorEvent) => {
+      // Ignore some non-critical SES warnings or known benign errors
+      if (error.message?.includes('SES Removing unpermitted intrinsics')) {
+        console.warn('SES Non-fatal Warning:', error.message);
+        return;
+      }
+      
       console.error('App Runtime Error:', error);
-      // Capture error details for the user
-      const errorMsg = error.error?.message || error.message || 'Unknown Error';
-      setHasError(errorMsg as any);
+      // Only trigger global error if it's likely a fatal rendering issue
+      if (error.filename?.includes('main.tsx') || error.message?.includes('render')) {
+        const errorMsg = error.error?.message || error.message || 'Unknown Error';
+        setHasError(errorMsg);
+      }
+    };
+
+    const handlePromiseRejection = (event: PromiseRejectionEvent) => {
+      console.error('Unhandled Promise Rejection:', event.reason);
+      
+      // If it's an AI or database error, we show it but don't necessarily crash the whole UI
+      const errorMsg = event.reason?.message || String(event.reason) || 'Unknown Promise Error';
+      
+      // Check if it's already caught by a component (via some custom property we could add)
+      // but for now, let's just log. To satisfy the user's "Don't jump back to home", 
+      // we don't setHasError here unless it's a critical auth or db connection failure.
+      if (errorMsg.includes('auth') || errorMsg.includes('database connection')) {
+         setHasError(errorMsg);
+      }
     };
 
     window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handlePromiseRejection);
+
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handlePromiseRejection);
+    };
   }, []);
 
   useEffect(() => {
@@ -163,20 +224,30 @@ export default function App() {
   if (hasError) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-        <X className="w-16 h-16 text-red-500 mb-4" />
+        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-6">
+          <X className="w-8 h-8 text-red-600" />
+        </div>
         <h2 className="text-2xl font-bold mb-2">系统遇到一个关键性错误</h2>
-        <p className="text-gray-500 mb-4 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
-        <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-6 max-w-md w-full">
-           <p className="text-[10px] font-mono text-red-600 break-words line-clamp-4">
-             {typeof hasError === 'string' ? hasError : '发生未知渲染错误'}
+        <p className="text-gray-500 mb-6 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
+        <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-8 max-w-md w-full shadow-sm">
+           <p className="text-[10px] font-mono text-left text-red-600 break-words line-clamp-6 leading-relaxed">
+             {hasError}
            </p>
         </div>
-        <button 
-          onClick={() => window.location.reload()}
-          className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs"
-        >
-          尝试重新激活
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button 
+            onClick={() => setHasError(null)}
+            className="px-8 py-3 bg-white border border-gray-200 text-gray-900 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-gray-50 transition-colors"
+          >
+            关闭错误提示
+          </button>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
+          >
+            尝试重新激活
+          </button>
+        </div>
       </div>
     );
   }
@@ -283,13 +354,12 @@ export default function App() {
 
         {/* View Content */}
         <div className="flex-1 overflow-auto p-4 lg:p-6">
-          <AnimatePresence mode="wait">
+          <LocalErrorBoundary key={currentView}>
             <motion.div
               key={currentView}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.2 }}
               className="h-full"
             >
               {currentView === 'dashboard' && (
@@ -313,7 +383,7 @@ export default function App() {
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'journey' && <JourneyGenerator />}
             </motion.div>
-          </AnimatePresence>
+          </LocalErrorBoundary>
         </div>
 
         {/* Footer */}

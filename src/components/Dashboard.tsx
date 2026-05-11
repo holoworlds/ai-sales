@@ -41,7 +41,7 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
         const skillsData = await localDb.getAll('skills');
         setSkillCount(skillsData.length);
 
-        const proposalsData = (await localDb.getAll('evolution_proposals')).filter((p: any) => p.status === 'pending');
+        const proposalsData = (await localDb.getAll('proposals')).filter((p: any) => p.status === 'pending');
         setProposalCount(proposalsData.length);
       } catch (error) {
         console.error("Dashboard data fetch failed:", error);
@@ -215,7 +215,7 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
                   <div className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed opacity-70">{client.nextActionSuggestion}</div>
                   <div className="flex items-center gap-2 mt-3 text-[9px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 w-fit px-2 py-0.5 rounded">
                     <Clock className="w-2.5 h-2.5" />
-                    建议执行: {client.nextActionDate?.toDate ? client.nextActionDate.toDate().toLocaleDateString() : '待定'}
+                    建议执行: {client.nextActionDate ? (client.nextActionDate.toDate ? client.nextActionDate.toDate().toISOString().split('T')[0] : new Date(client.nextActionDate).toISOString().split('T')[0]) : '待定'}
                   </div>
                 </div>
               </div>

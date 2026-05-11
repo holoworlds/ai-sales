@@ -21,10 +21,15 @@ const API_BASE = '/api/db';
 
 export const localDb = {
   getCollection: async (collectionName: string) => {
-    const res = await fetch(`${API_BASE}/${collectionName}`);
-    if (!res.ok) return [];
-    const data = await safeJson(res);
-    return data || [];
+    try {
+      const res = await fetch(`${API_BASE}/${collectionName}`);
+      if (!res.ok) return [];
+      const data = await safeJson(res);
+      return data || [];
+    } catch (err) {
+      console.error(`[localDb] getCollection error for ${collectionName}:`, err);
+      return [];
+    }
   },
 
   getAll: async (collectionName: string) => {
@@ -37,40 +42,54 @@ export const localDb = {
   },
 
   add: async (collectionName: string, doc: any) => {
-    const newDoc = {
-      ...doc,
-      id: uuidv4(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    const res = await fetch(`${API_BASE}/${collectionName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newDoc)
-    });
-    
-    return await safeJson(res);
+    try {
+      const newDoc = {
+        ...doc,
+        id: uuidv4(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      const res = await fetch(`${API_BASE}/${collectionName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newDoc)
+      });
+      
+      return await safeJson(res);
+    } catch (err) {
+      console.error(`[localDb] add error for ${collectionName}:`, err);
+      return null;
+    }
   },
 
   update: async (collectionName: string, id: string, updates: any) => {
-    const res = await fetch(`${API_BASE}/${collectionName}/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...updates,
-        updatedAt: new Date().toISOString()
-      })
-    });
-    
-    if (!res.ok) return null;
-    return await safeJson(res);
+    try {
+      const res = await fetch(`${API_BASE}/${collectionName}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...updates,
+          updatedAt: new Date().toISOString()
+        })
+      });
+      
+      if (!res.ok) return null;
+      return await safeJson(res);
+    } catch (err) {
+      console.error(`[localDb] update error for ${collectionName}/${id}:`, err);
+      return null;
+    }
   },
 
   delete: async (collectionName: string, id: string) => {
-    await fetch(`${API_BASE}/${collectionName}/${id}`, {
-      method: 'DELETE'
-    });
+    try {
+      await fetch(`${API_BASE}/${collectionName}/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.error(`[localDb] delete error for ${collectionName}/${id}:`, err);
+    }
   },
 
   query: async (collectionName: string, filterFn: (item: any) => boolean) => {
@@ -82,12 +101,13 @@ export const localDb = {
 // Auth replacement using server-side storage
 export const localAuth = {
   getCurrentUserAsync: async () => {
-    const res = await fetch('/api/auth/me');
-    if (!res.ok) return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
     try {
+      const res = await fetch('/api/auth/me');
+      if (!res.ok) return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
       const text = await res.text();
       return text ? JSON.parse(text) : { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
     } catch (err) {
+      console.error(`[localAuth] getCurrentUserAsync error:`, err);
       return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
     }
   },

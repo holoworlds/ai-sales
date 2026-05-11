@@ -32,6 +32,16 @@ const cleanUrl = (url: string) => {
   return url.replace(/\/+$/, '');
 };
 
+export const sanitizeAIContent = (text: string): string => {
+  if (!text) return '';
+  // Remove or replace characters that might trigger SES security errors
+  return text
+    .replace(/\b(eval|Function|setInterval|setTimeout)\b/ig, '_$1_')
+    .replace(/[`$]/g, '') // Remove backticks and dollar signs to avoid template literal / variable injection issues
+    .replace(/[{}()\[\]]/g, (m) => ` ${m} `) // Add spaces around brackets to break potential code execution patterns
+    .trim();
+};
+
 export const callLLM = async (prompt: string, options: { json?: boolean, systemInstruction?: string } = {}) => {
   const config = await getActiveConfig();
   
@@ -40,6 +50,8 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
   }
 
   console.log(`[LLM] Calling ${config.provider} with model ${config.modelId}`);
+
+  let resultText = '';
 
   if (config.provider === LLMProvider.GOOGLE) {
     const apiKey = config.apiKey || (process.env as any).GEMINI_API_KEY;
@@ -60,21 +72,18 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
       });
 
       // Newer GenAI SDK might return nested text or response object
-      let text = '';
       if (typeof (response as any).text === 'function') {
-        text = (response as any).text();
+        resultText = (response as any).text();
       } else if (typeof response.text === 'string') {
-        text = response.text;
+        resultText = response.text;
       } else if ((response as any).response?.text) {
-        text = (response as any).response.text();
+        resultText = (response as any).response.text();
       }
 
-      if (!text) {
+      if (!resultText) {
         console.warn('[LLM] Gemini returned empty response', response);
-        return '';
+        resultText = '';
       }
-
-      return text;
     } catch (error) {
       console.error('[LLM] Gemini Error:', error);
       throw error;
@@ -120,12 +129,15 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
       const data = await response.json();
       if (!data.choices?.[0]?.message?.content) {
         console.warn('[LLM] Provider returned empty content', data);
-        return '';
+        resultText = '';
+      } else {
+        resultText = data.choices[0].message.content;
       }
-      return data.choices[0].message.content;
     } catch (error) {
       console.error(`[LLM] ${config.provider} Error:`, error);
       throw error;
     }
   }
+
+  return sanitizeAIContent(resultText);
 };

@@ -23,7 +23,7 @@ import {
   FileUp
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import ClientDetails from './ClientDetails';
 
 interface ClientManagerProps {
@@ -83,13 +83,18 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
   };
 
   const fetchData = async () => {
-    const user = await localAuth.getCurrentUserAsync();
-    if (!user) return;
-    const data = await localDb.getAll('clients');
-    // Sort by updatedAt desc
-    data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    setClients(data);
-    setLoading(false);
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
+      const data = await localDb.getAll('clients');
+      // Sort by updatedAt desc
+      data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      setClients(data);
+      setLoading(false);
+    } catch (error) {
+      console.error("[ClientManager] fetchData error:", error);
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -98,11 +103,14 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const user = await localAuth.getCurrentUserAsync();
-    if (!file || !user) return;
+    if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
+
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
@@ -185,16 +193,23 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
         alert('导入过程中出现错误，请检查文件格式');
       }
     };
-    reader.readAsBinaryString(file);
-    e.target.value = ''; // Reset input
+      reader.readAsBinaryString(file);
+      e.target.value = ''; // Reset input
+    } catch (err) {
+      console.error("[ClientManager] handleImportExcel error:", err);
+    }
   };
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = await localAuth.getCurrentUserAsync();
-    if (!user || isCreatingClient) return;
+    if (isCreatingClient) return;
     setIsCreatingClient(true);
     try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) {
+        setIsCreatingClient(false);
+        return;
+      }
       await localDb.add('clients', {
         ...newClient,
         promoter: newClient.name, // Ensure promoter is synced from name on creation
@@ -218,6 +233,8 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     setIsLogging(true);
     try {
       const user = await localAuth.getCurrentUserAsync();
+      if (!user) throw new Error('User not found');
+
       await localDb.add(`clients/${quickLogClient.id}/interactions` as any, {
         clientId: quickLogClient.id,
         content: logContent,
@@ -225,7 +242,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
         authorId: user?.uid
       });
 
-      const result = await analyzeClientStage(logContent);
+      const result = JSON.parse(JSON.stringify(await analyzeClientStage(logContent)));
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + (result.recommendedFollowupDays || 7));
 
@@ -514,8 +531,7 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
       </div>
 
       {/* Quick Log Modal */}
-      <AnimatePresence>
-        {quickLogClient && (
+      {quickLogClient && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -563,11 +579,9 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* Add Client Modal */}
-      <AnimatePresence>
-        {isAddingClient && (
+      {isAddingClient && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -630,7 +644,6 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

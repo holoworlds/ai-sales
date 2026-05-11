@@ -35,7 +35,7 @@ import {
   Key,
   Link
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 interface StrategicAdvisorProps {
   setCurrentView?: (view: 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey') => void;
@@ -53,6 +53,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   const [isGeneratingLab, setIsGeneratingLab] = useState(false);
   const [queryText, setQueryText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [reasoningResult, setReasoningResult] = useState<any>(null);
   const [pendingAction, setPendingAction] = useState<any>(null);
   const [executingAction, setExecutingAction] = useState(false);
@@ -86,19 +87,23 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   }, []);
 
   const fetchData = async () => {
-    const clientsData = await localDb.getAll('clients');
-    const knowledgeData = await localDb.getAll('knowledge');
-    const skillsData = await localDb.getAll('skills');
-    const proposalsData = await localDb.getAll('proposals');
-    const configsData = await localDb.getAll('llmConfigs');
-    
-    setClients(clientsData);
-    setKnowledge(knowledgeData);
-    setSkills(skillsData);
-    setProposals(proposalsData.sort((a: any, b: any) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    ));
-    setLlmConfigs(configsData);
+    try {
+      const clientsData = await localDb.getAll('clients');
+      const knowledgeData = await localDb.getAll('knowledge');
+      const skillsData = await localDb.getAll('skills');
+      const proposalsData = await localDb.getAll('proposals');
+      const configsData = await localDb.getAll('llmConfigs');
+      
+      setClients(clientsData);
+      setKnowledge(knowledgeData);
+      setSkills(skillsData);
+      setProposals(proposalsData.sort((a: any, b: any) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ));
+      setLlmConfigs(configsData);
+    } catch (error) {
+      console.error("[StrategicAdvisor] fetchData error:", error);
+    }
   };
 
   const getActiveModel = () => {
@@ -106,57 +111,73 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   };
 
   const setActiveModel = async (modelId: string) => {
-    const updated = llmConfigs.map(c => ({
-       ...c,
-       isPrimary: c.modelId === modelId
-    }));
-    for (const config of updated) {
-       await localDb.update('llmConfigs', config.id, config);
+    try {
+      const updated = llmConfigs.map(c => ({
+         ...c,
+         isPrimary: c.modelId === modelId
+      }));
+      for (const config of updated) {
+         await localDb.update('llmConfigs', config.id, config);
+      }
+      setLlmConfigs(updated);
+    } catch (error) {
+      console.error("[StrategicAdvisor] setActiveModel error:", error);
     }
-    setLlmConfigs(updated);
   };
 
   const setPrimaryModel = async (id: string) => {
-    const updated = llmConfigs.map(c => ({
-       ...c,
-       isPrimary: c.id === id
-    }));
-    for (const config of updated) {
-       await localDb.update('llmConfigs', config.id, config);
+    try {
+      const updated = llmConfigs.map(c => ({
+         ...c,
+         isPrimary: c.id === id
+      }));
+      for (const config of updated) {
+         await localDb.update('llmConfigs', config.id, config);
+      }
+      setLlmConfigs(updated);
+    } catch (error) {
+      console.error("[StrategicAdvisor] setPrimaryModel error:", error);
     }
-    setLlmConfigs(updated);
   };
 
   const handleAddLLM = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = await localAuth.getCurrentUserAsync();
-    const config: LLMConfig = {
-      id: crypto.randomUUID(),
-      displayName: newLLM.displayName!,
-      provider: newLLM.provider!,
-      modelId: newLLM.modelId!,
-      apiKey: newLLM.apiKey!,
-      baseUrl: newLLM.baseUrl,
-      isPrimary: llmConfigs.length === 0,
-      status: 'Active',
-      ownerId: user?.uid || 'local-user'
-    } as any; 
-    await localDb.add('llmConfigs', config);
-    setLlmConfigs([...llmConfigs, config]);
-    setIsAddingLLM(false);
-    setNewLLM({
-      displayName: '',
-      provider: LLMProvider.GOOGLE,
-      modelId: '',
-      apiKey: '',
-      baseUrl: '',
-      isPrimary: false
-    });
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      const config: LLMConfig = {
+        id: crypto.randomUUID(),
+        displayName: newLLM.displayName!,
+        provider: newLLM.provider!,
+        modelId: newLLM.modelId!,
+        apiKey: newLLM.apiKey!,
+        baseUrl: newLLM.baseUrl,
+        isPrimary: llmConfigs.length === 0,
+        status: 'Active',
+        ownerId: user?.uid || 'local-user'
+      } as any; 
+      await localDb.add('llmConfigs', config);
+      setLlmConfigs([...llmConfigs, config]);
+      setIsAddingLLM(false);
+      setNewLLM({
+        displayName: '',
+        provider: LLMProvider.GOOGLE,
+        modelId: '',
+        apiKey: '',
+        baseUrl: '',
+        isPrimary: false
+      });
+    } catch (error) {
+      console.error("[StrategicAdvisor] handleAddLLM error:", error);
+    }
   };
 
   const deleteLLM = async (id: string) => {
-    await localDb.delete('llmConfigs', id);
-    setLlmConfigs(llmConfigs.filter(c => c.id !== id));
+    try {
+      await localDb.delete('llmConfigs', id);
+      setLlmConfigs(llmConfigs.filter(c => c.id !== id));
+    } catch (error) {
+      console.error("[StrategicAdvisor] deleteLLM error:", error);
+    }
   };
 
   const handleReasoning = async (e?: React.FormEvent) => {
@@ -164,6 +185,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     if (!queryText.trim()) return;
 
     setLoading(true);
+    setError(null);
     setReasoningResult(null);
     setPendingAction(null);
 
@@ -174,31 +196,34 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       );
       
       if (result?.error) {
-        setReasoningResult({
-          decision: '推理失败',
-          analysis: result.message || 'AI 暂时无法处理该指令',
-          recommendedAction: '请尝试简化指令或稍后再试',
+        setError(result.message || 'AI 推理暂时不可用');
+        setReasoningResult(JSON.parse(JSON.stringify({
+          decision: '推理受阻',
+          analysis: result.message || '由于模型响应异常，Agent 无法完成该指令的推理。建议检查模型 API 配置。',
+          recommendedAction: '重试或更换模型',
           generatedMessage: '系统错误',
-          confidence: 0
-        } as any);
+          confidence: 0,
+          usedSkills: []
+        })));
       } else {
-        setReasoningResult(result);
-        if (result?.suggestedSystemAction) {
-          setPendingAction(result.suggestedSystemAction);
+        const dehydratedResult = JSON.parse(JSON.stringify(result));
+        setReasoningResult(dehydratedResult);
+        if (dehydratedResult?.suggestedSystemAction) {
+          setPendingAction(dehydratedResult.suggestedSystemAction);
         }
       }
       setQueryText('');
       
-      // Save reasoning to logs
       const user = await localAuth.getCurrentUserAsync();
       await localDb.add('agentLogs', {
         type: 'reasoning',
         query: queryText,
-        result: result,
+        result: JSON.parse(JSON.stringify(result)),
         userId: user?.uid
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Reasoning failed:", error);
+      setError(error.message || 'AI 推理引擎发生严重错误');
     } finally {
       setLoading(false);
     }
@@ -228,19 +253,20 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     e.preventDefault();
     setIsEvaluating(true);
     try {
-      const result = await evaluateEvolutionProposal({
+      const rawResult = await evaluateEvolutionProposal({
         name: manualProposal.name,
         description: manualProposal.description,
         goal: manualProposal.goal,
         currentSkills: skills
       });
       
+      const result = JSON.parse(JSON.stringify(rawResult));
       setEvaluationResult(result);
       
       if (result.isAccepted) {
         const proposal: EvolutionProposal = {
           id: crypto.randomUUID(),
-          ...result.refinedProposal,
+          ...(result.refinedProposal || {}),
           status: 'pending',
           isManual: true,
           createdAt: new Date()
@@ -263,11 +289,11 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
   const approveProposal = async (proposal: EvolutionProposal) => {
     try {
-      const result = await evaluateEvolutionProposal({ proposal, existingSkills: skills }); 
-      // Fallback if evolveAgentCapability isn't fully defined yet
+      const rawResult = await evaluateEvolutionProposal({ proposal, existingSkills: skills }); 
+      const result = JSON.parse(JSON.stringify(rawResult));
       const newSkill = {
-        name: proposal.suggestedSkillName,
-        description: proposal.suggestedSkillDescription,
+        name: result?.refinedProposal?.suggestedSkillName || proposal.suggestedSkillName,
+        description: result?.refinedProposal?.suggestedSkillDescription || proposal.suggestedSkillDescription,
         code: "// Simulated evolved code bundle",
         id: crypto.randomUUID()
       };
@@ -339,11 +365,10 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
         {/* Content Area */}
         <div className="flex-1 p-12 overflow-y-auto no-scrollbar">
-           <AnimatePresence mode="wait">
               {activeTab === 'agent' && (
                 <motion.div 
                   key="agent"
-                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                   className="space-y-10"
                 >
                    <div className="flex items-center justify-between">
@@ -418,6 +443,22 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                       </div>
                    ) : (
                       <div className="space-y-8">
+                         {error && (
+                            <motion.div 
+                              initial={{ opacity: 0, y: -20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-start gap-4"
+                            >
+                               <AlertCircle className="w-5 h-5 text-red-500 mt-1 shrink-0" />
+                               <div className="flex-1">
+                                  <div className="text-sm font-bold text-red-500 mb-1">推理引擎异常</div>
+                                  <div className="text-xs text-red-400/80 leading-relaxed font-mono break-all">{error}</div>
+                               </div>
+                               <button onClick={() => setError(null)} className="text-red-500 p-1 hover:bg-red-500/10 rounded-lg">
+                                  <XCircle className="w-4 h-4" />
+                               </button>
+                            </motion.div>
+                         )}
                          {loading ? (
                            <div className="h-[400px] flex flex-col items-center justify-center text-center">
                               <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-6" />
@@ -488,7 +529,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                  <div className="bg-white/5 border border-white/10 p-8 rounded-[2rem]">
                                     <div className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-6">Layer 4: 命中的能力集</div>
                                     <div className="space-y-3">
-                                       {reasoningResult.usedSkills?.map((s: string) => (
+                                       {(reasoningResult.usedSkills || []).map((s: string) => (
                                           <div key={s} className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-xl border border-white/5">
                                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                                              <span className="text-[10px] font-bold text-gray-300">{s}</span>
@@ -522,7 +563,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
               )}
 
               {activeTab === 'lab' && (
-                <motion.div key="lab" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
+                <motion.div key="lab" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
                    <div className="flex items-center justify-between">
                       <div>
                          <h2 className="text-3xl font-bold tracking-tight mb-2">LLM 实验室 (Asset Laboratory)</h2>
@@ -566,8 +607,11 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                try {
                                   const { generateContentAsset } = await import('../services/gemini');
                                   const result = await generateContentAsset(labType as any, "系统全局上下文 (知识集 + 技能集)", labReqs);
-                                  setLabResult(result);
-                               } catch (err) { console.error(err); }
+                                  setLabResult(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+                               } catch (err) { 
+                                 console.error(err); 
+                                 setLabResult("资产生成失败，请检查网络或模型配置。");
+                               }
                                finally { setIsGeneratingLab(false); }
                             }}
                             disabled={isGeneratingLab || !labReqs.trim()}
@@ -582,23 +626,33 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          <div className="px-8 py-5 border-b border-white/5 bg-white/5 flex justify-between items-center relative z-10">
                             <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">熔炼输出 (Forge Output)</span>
                             {labResult && (
-                               <button onClick={() => { navigator.clipboard.writeText(labResult); alert('已复制到剪贴板'); }} className="text-purple-400 hover:text-white transition-colors">
+                               <button 
+                                onClick={async () => { 
+                                  try {
+                                    await navigator.clipboard.writeText(labResult); 
+                                    alert('已复制到剪贴板'); 
+                                  } catch (err) {
+                                    console.error('Failed to copy:', err);
+                                  }
+                                }} 
+                                className="text-purple-400 hover:text-white transition-colors"
+                              >
                                   <Cpu className="w-4 h-4" />
                                </button>
                             )}
                          </div>
                          <div className="flex-1 p-10 overflow-y-auto no-scrollbar font-mono text-xs leading-relaxed text-gray-300">
                             {labResult ? (
-                              <div className="prose prose-invert prose-sm max-w-none">
-                                 {labResult.split('\n').map((line, i) => (
-                                    <p key={i} className="mb-4">{line}</p>
-                                 ))}
-                              </div>
+                               <div className="prose prose-invert prose-sm max-w-none">
+                                  {labResult.split('\n').map((line, i) => (
+                                     <p key={i} className="mb-4">{line}</p>
+                                  ))}
+                               </div>
                             ) : (
-                              <div className="h-full flex flex-col items-center justify-center text-center opacity-20">
-                                 <DbIcon className="w-16 h-16 mb-6" />
-                                 <p className="text-[10px] font-black uppercase tracking-[0.2em]">待熔炼生成中...</p>
-                              </div>
+                               <div className="h-full flex flex-col items-center justify-center text-center opacity-20">
+                                  <DbIcon className="w-16 h-16 mb-6" />
+                                  <p className="text-[10px] font-black uppercase tracking-[0.2em]">待熔炼生成中...</p>
+                               </div>
                             )}
                          </div>
                       </div>
@@ -607,7 +661,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
               )}
 
               {activeTab === 'skills' && (
-                <motion.div key="skills" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
+                <motion.div key="skills" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
                    <h2 className="text-3xl font-bold tracking-tight text-gray-900 italic">Layer 4: 认知能力集</h2>
                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {skills.map(skill => (
@@ -661,7 +715,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
               )}
 
               {activeTab === 'evolution' && (
-                <motion.div key="evolution" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
+                <motion.div key="evolution" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
                    <div className="flex items-center justify-between">
                       <h2 className="text-3xl font-bold tracking-tight">Layer 7: 进化引擎</h2>
                       <div className="px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold flex items-center gap-2">
@@ -715,7 +769,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
               )}
 
               {activeTab === 'llm' && (
-                <motion.div key="llm" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
+                <motion.div key="llm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
                    <div className="flex items-center justify-between">
                       <div>
                         <h2 className="text-3xl font-bold tracking-tight mb-2">模型枢纽 (LLM Hub)</h2>
@@ -791,20 +845,18 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                               )}
                            </div>
                            <div className="absolute -bottom-4 -right-4 text-7xl font-black text-white/[0.02] pointer-events-none select-none italic uppercase">
-                              {config.provider}
+                               {config.provider}
                            </div>
                         </div>
                       ))}
                    </div>
                 </motion.div>
               )}
-           </AnimatePresence>
         </div>
 
-        <AnimatePresence>
            {selectedSkill && (
              <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-2xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-2xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
                    <button onClick={() => setSelectedSkill(null)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
                    
                    <div className="flex items-center gap-6 mb-10">
@@ -859,7 +911,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
            {selectedProposal && (
              <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-3xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-3xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
                    <button onClick={() => setSelectedProposal(null)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
                    
                    <div className="flex items-center gap-6 mb-10">
@@ -909,12 +961,12 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          {selectedProposal.status === 'pending' && (
                            <button 
                              onClick={() => {
-                               approveProposal(selectedProposal);
-                               setSelectedProposal(null);
+                                approveProposal(selectedProposal);
+                                setSelectedProposal(null);
                              }}
                              className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 transition-all active:scale-95"
                            >
-                              批准并立即集成
+                               批准并立即集成
                            </button>
                          )}
                       </div>
@@ -925,7 +977,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
            {isAddingLLM && (
              <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-xl relative p-12 text-white shadow-2xl">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-xl relative p-12 text-white shadow-2xl">
                    <button onClick={() => setIsAddingLLM(false)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
                    <div className="flex items-center gap-6 mb-10">
                       <div className="w-14 h-14 bg-orange-600 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-600/20 text-white font-bold text-2xl">
@@ -984,13 +1036,11 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                 </motion.div>
              </div>
            )}
-        </AnimatePresence>
 
         {/* Manual Proposal Modal */}
-        <AnimatePresence>
            {isAddingProposal && (
              <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-2xl relative p-12 text-white">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-2xl relative p-12 text-white">
                    <button onClick={() => setIsAddingProposal(false)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
                    <h3 className="text-2xl font-bold mb-10">手动注入进化提案</h3>
                    {evaluationResult ? (
@@ -1015,7 +1065,6 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                 </motion.div>
              </div>
            )}
-        </AnimatePresence>
     </div>
   );
 }

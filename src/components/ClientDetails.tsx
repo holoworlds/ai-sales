@@ -32,7 +32,7 @@ import {
   ShieldCheck,
   Briefcase
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
 interface ClientDetailsProps {
@@ -48,7 +48,19 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   // Interaction Form
   const [newInteraction, setNewInteraction] = useState('');
   const [generatingReply, setGeneratingReply] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [aiReply, setAiReply] = useState('');
+
+  const safeDateFormat = (date: any) => {
+    if (!date) return '待定';
+    try {
+      const d = date.toDate ? date.toDate() : new Date(date);
+      if (isNaN(d.getTime())) return '待定';
+      return d.toISOString().split('T')[0];
+    } catch (e) {
+      return '格式错误';
+    }
+  };
 
   // Analysis State
   const [analyzing, setAnalyzing] = useState(false);
@@ -116,7 +128,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
         setIsSuggesting(true);
         try {
           const suggestion = await generateRealtimeInputSuggestion(newInteraction, client);
-          setDebouncedSuggestion(suggestion);
+          setDebouncedSuggestion(suggestion ? String(suggestion) : null);
         } catch (err) {
           console.error(err);
         } finally {
@@ -134,20 +146,33 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const [assetFilter, setAssetFilter] = useState<'all' | 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing'>('all');
 
   const fetchData = useCallback(async () => {
-    const user = await localAuth.getCurrentUserAsync();
-    if (!user) return;
-    
-    // Check if client is still valid
-    if (!client?.id) return;
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
+      
+      // Check if client is still valid
+      if (!client?.id) return;
 
-    const iData = await localDb.getAll(`clients/${client.id}/interactions` as any);
-    // Sort oldest to newest for chat flow
-    iData.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    setInteractions(iData);
+      const iData = await localDb.getAll(`clients/${client.id}/interactions` as any);
+      // Sort oldest to newest for chat flow
+      iData.sort((a: any, b: any) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeA - timeB;
+      });
+      setInteractions(iData);
 
-    const cData = await localDb.getAll(`clients/${client.id}/content` as any);
-    cData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    setContentAssets(cData);
+      const cData = await localDb.getAll(`clients/${client.id}/content` as any);
+      cData.sort((a: any, b: any) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+      setContentAssets(cData);
+    } catch (error) {
+      console.error("[ClientDetails] fetchData error:", error);
+      setError("从数据库读取数据失败，请重试。");
+    }
   }, [client?.id]);
 
   useEffect(() => {
@@ -157,6 +182,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const handleGenerateReply = async () => {
     if (!newInteraction.trim()) return;
     setGeneratingReply(true);
+    setError(null);
     const textToAnalyze = newInteraction;
     setNewInteraction(''); 
     
@@ -199,7 +225,8 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
 
       // 3. Generate AI report
       const history = interactions.slice(-5).map(i => `${i.authorId === user?.uid ? 'Me' : 'AI'}: ${i.content}`).join('\n');
-      const reply = await generateMarketingReply(textToAnalyze, history || client.memorySummary || '');
+      const rawReply = await generateMarketingReply(textToAnalyze, history || client.memorySummary || '');
+      const reply = typeof rawReply === 'string' ? rawReply : JSON.parse(JSON.stringify(rawReply))?.content || String(rawReply);
       
       // 4. Update Database - Replace/Add AI response
       await localDb.add(`clients/${client.id}/interactions` as any, {
@@ -222,12 +249,14 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   };
 
   const handleSaveInteraction = async () => {
-    const user = await localAuth.getCurrentUserAsync();
     const content = newInteraction.trim();
-    if (!content || !user) return;
+    if (!content) return;
     
-    setNewInteraction(''); // Clear immediately
+    setNewInteraction(''); 
     try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
+
       // 1. Optimistic UI update
       const tempFactId = `temp-fact-${Date.now()}`;
       const tempConfirmationId = `temp-conf-${Date.now()}`;
@@ -301,7 +330,7 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
       const chatLog = interactions.map(i => `${i.authorId === user?.uid ? 'Me' : 'Client'}: ${i.content}`).join('\n');
       const briefings = contentAssets
         .filter(a => a.type === 'Briefing')
-        .map(a => `[Meeting Intelligence - ${a.createdAt?.toDate ? a.createdAt.toDate().toLocaleDateString() : 'Recent'}]:\n${a.body}`)
+        .map(a => `[Meeting Intelligence - ${safeDateFormat(a.createdAt)}]:\n${a.body}`)
         .join('\n\n---\n\n');
       
       const textLog = `
@@ -312,7 +341,7 @@ MEETING INTELLIGENCE & PROJECT UPDATES:
 ${briefings}
       `.trim();
 
-      const result = await analyzeClientStage(textLog);
+      const result = JSON.parse(JSON.stringify(await analyzeClientStage(textLog)));
       setAnalysisResult(result);
       
       const nextDate = new Date();
@@ -336,8 +365,9 @@ ${briefings}
         progress: result.extractedFields?.progress || client.progress,
       });
       fetchData();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setError(err.message || '分析引擎异常，请检查 AI 配置');
     } finally {
       setAnalyzing(false);
     }
@@ -358,8 +388,9 @@ ${briefings}
                  `#### ${s.step}\n**策略:** ${s.strategy}\n\n**建议话术:** \n> ${s.scripts}\n`
                ).join('\n---\n');
       } else {
-        body = await generateContentAsset(activeType, JSON.stringify(client), genReqs);
-        title = `${activeType} for ${client.company} - ${new Date().toLocaleDateString()}`;
+        const result = await generateContentAsset(activeType, JSON.stringify(client), genReqs);
+        body = typeof result === 'string' ? result : (result.message || JSON.stringify(result));
+        title = `${activeType} for ${client.company} - ${safeDateFormat(new Date())}`;
       }
 
       const user = await localAuth.getCurrentUserAsync();
@@ -383,12 +414,12 @@ ${briefings}
     if (!rawMeetingInput.trim()) return;
     setGeneratingBriefing(true);
     try {
-      const result = await generateMeetingIntelligence(rawMeetingInput, {
+      const result = JSON.parse(JSON.stringify(await generateMeetingIntelligence(rawMeetingInput, {
         clientName: client.company,
         projectName: client.company, // Using company as project name for simple context
         currentPhase: client.stage,
         participants: [client.name]
-      });
+      })));
       setBriefingResult(result);
 
       // Save as a permanent asset
@@ -455,6 +486,7 @@ ${result.winningStrategy}
     setConsultationText('');
     setConsultHistory(prev => [...prev, { role: 'user', content: userMsg }]);
     setConsulting(true);
+    setError(null);
 
     try {
       const context = `
@@ -462,10 +494,11 @@ ${result.winningStrategy}
         Summary: ${client.memorySummary}
         Interactions: ${interactions.map(i => i.content).join('\n')}
       `;
-      const result = await consultClientStrategy(userMsg, context);
+      const rawResult = await consultClientStrategy(userMsg, context);
+      const result = JSON.parse(JSON.stringify(rawResult));
       setConsultHistory(prev => [...prev, { 
         role: 'ai', 
-        content: result?.reply || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。') 
+        content: String(result?.reply || result?.content || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。'))
       }]);
 
       if (result.suggestedUpdates) {
@@ -475,11 +508,12 @@ ${result.winningStrategy}
         if (result.suggestedUpdates.stage) updates.stage = result.suggestedUpdates.stage;
         if (result.suggestedUpdates.nextActionSuggestion) updates.nextActionSuggestion = result.suggestedUpdates.nextActionSuggestion;
         
-        localDb.update('clients', client.id, updates);
+        await localDb.update('clients', client.id, updates);
         await fetchData();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setError(err.message || '对话研讨暂时中断，请重试');
     } finally {
       setConsulting(false);
     }
@@ -637,6 +671,11 @@ ${result.winningStrategy}
                 >
                   {localNextActionCompleted ? '已执行 (点击撤销)' : '确认已执行'}
                 </button>
+                {error && (
+                  <div className="absolute top-full mt-2 right-0 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg text-[8px] text-red-500">
+                    {error}
+                  </div>
+                )}
              </div>
              <div className={`text-sm font-bold leading-relaxed pr-4 ${localNextActionCompleted ? 'text-white/30 line-through' : 'text-white/90'}`}>
                 {client.nextActionSuggestion}
@@ -644,7 +683,7 @@ ${result.winningStrategy}
              <div className="mt-4 flex items-center justify-between pt-4 border-t border-white/5 pr-4">
                 <div className="flex items-center gap-2 text-[9px] font-bold text-white/40 uppercase tracking-widest">
                    <Clock className="w-3 h-3 text-blue-400" />
-                   截止日期: {client.nextActionDate?.toDate ? client.nextActionDate.toDate().toLocaleDateString() : '待定'}
+                   截止日期: {safeDateFormat(client.nextActionDate)}
                 </div>
                 <div className="flex items-center gap-1.5">
                    <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" />
@@ -683,13 +722,11 @@ ${result.winningStrategy}
 
       {/* Content Area */}
       <div className="flex-1 flex flex-col p-8 lg:p-10">
-        <AnimatePresence mode="wait">
           {activeTab === 'briefing' && (
             <motion.div 
                key="briefing"
-               initial={{ opacity: 0, y: 10 }}
-               animate={{ opacity: 1, y: 0 }}
-               exit={{ opacity: 0, y: 10 }}
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
                className="flex-1 flex gap-10"
             >
                <div className="flex-1 flex flex-col gap-8 pb-32">
@@ -900,7 +937,7 @@ ${result.winningStrategy}
                                     </div>
                                   ) : (
                                     <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-strong:text-blue-600 prose-p:text-gray-600">
-                                       <ReactMarkdown>{asset.body}</ReactMarkdown>
+                                       <ReactMarkdown>{String(asset.body || '')}</ReactMarkdown>
                                     </div>
                                   )}
                                  </div>
@@ -965,8 +1002,8 @@ ${result.winningStrategy}
                          </button>
                       </section>
 
-                      <AnimatePresence>
-                        {briefingResult && (
+                      {/* Briefing Result Area */}
+                      {briefingResult && (
                           <motion.div 
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1128,7 +1165,6 @@ ${result.winningStrategy}
                              </div>
                           </motion.div>
                         )}
-                      </AnimatePresence>
                     </>
                   )}
                </div>
@@ -1259,7 +1295,7 @@ ${result.winningStrategy}
                                   </div>
                                 )}
                                 <div className="prose-sm max-w-none">
-                                  <ReactMarkdown>{i.content || ''}</ReactMarkdown>
+                                  <ReactMarkdown>{String(i.content || '')}</ReactMarkdown>
                                 </div>
                               </div>
                               <div className={`mt-3 flex items-center gap-4 px-2 ${i.authorId === localAuth.getCurrentUser()?.uid ? 'justify-end' : ''}`}>
@@ -1299,8 +1335,8 @@ ${result.winningStrategy}
                 <div className="p-8 bg-gray-50/50 border-t border-gray-100 shrink-0">
                   <div className="max-w-4xl mx-auto flex flex-col gap-4">
                     {/* Debounced Suggestion Bubble */}
-                    <AnimatePresence>
-                      {(debouncedSuggestion || isSuggesting) && (
+                    {/* AI Suggestion Bubble */}
+                    {(debouncedSuggestion || isSuggesting) && (
                         <motion.div 
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1321,7 +1357,6 @@ ${result.winningStrategy}
                           </p>
                         </motion.div>
                       )}
-                    </AnimatePresence>
 
                     <div className="flex gap-4">
                       <div className="flex-1 relative group">
@@ -1453,7 +1488,7 @@ ${result.winningStrategy}
                             : 'bg-gray-50 text-gray-900 border border-gray-100 rounded-tl-none'
                         }`}>
                           <div className="text-sm leading-relaxed prose-sm">
-                            <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+                            <ReactMarkdown>{String(msg.content || '')}</ReactMarkdown>
                           </div>
                         </div>
                       </div>
@@ -1638,8 +1673,8 @@ ${result.winningStrategy}
                                 </div>
                               </div>
 
-                              <AnimatePresence>
-                                {expandedScoreCategory === cat && (
+                              {/* Score Details Expansion */}
+                              {expandedScoreCategory === cat && (
                                   <motion.div 
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
@@ -1672,7 +1707,6 @@ ${result.winningStrategy}
                                     ))}
                                   </motion.div>
                                 )}
-                              </AnimatePresence>
                               {expandedScoreCategory !== cat && (
                                 <p className="text-[9px] text-gray-400 leading-relaxed px-4">
                                   {cat === 'strategicValue' ? '评估项目行业潜力、成熟度及压力。' :
@@ -1938,13 +1972,18 @@ ${result.winningStrategy}
                            {asset.createdAt?.toDate ? asset.createdAt.toDate().toLocaleDateString('en-GB') : '已就绪'}
                         </div>
                         <div className="flex-1 line-clamp-5 text-sm text-gray-500 mb-8 prose-sm font-sans italic opacity-80 group-hover:opacity-100 transition-opacity">
-                          <ReactMarkdown>{asset.body}</ReactMarkdown>
+                          <ReactMarkdown>{String(asset.body || '')}</ReactMarkdown>
                         </div>
                         <div className="flex gap-3 border-t border-gray-100 pt-8 mt-auto">
                           <button 
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation();
-                              navigator.clipboard.writeText(asset.body);
+                              try {
+                                await navigator.clipboard.writeText(asset.body);
+                                alert('已复制到剪贴板');
+                              } catch (err) {
+                                console.error('Copy failed', err);
+                              }
                             }} 
                             className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-gray-50 hover:bg-blue-600 hover:text-white rounded-2xl transition-all text-[10px] font-bold uppercase tracking-widest shadow-sm"
                           >
@@ -2019,11 +2058,9 @@ ${result.winningStrategy}
             </motion.div>
           )}
 
-        </AnimatePresence>
       </div>
 
       {/* Asset Details Modal */}
-      <AnimatePresence>
         {selectedAssetId && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -2066,15 +2103,19 @@ ${result.winningStrategy}
 
                     <div className="flex-1 overflow-y-auto p-12 no-scrollbar">
                        <div className="prose prose-lg max-w-none prose-headings:text-gray-900 prose-p:text-gray-600 prose-strong:text-blue-600 prose-a:text-blue-600">
-                          <ReactMarkdown>{asset.body}</ReactMarkdown>
+                          <ReactMarkdown>{String(asset.body || '')}</ReactMarkdown>
                        </div>
                     </div>
 
                     <div className="p-10 border-t border-gray-100 bg-gray-50/50 flex gap-4 shrink-0">
                        <button 
-                         onClick={() => {
-                           navigator.clipboard.writeText(asset.body);
-                           // Optional: toast notification
+                         onClick={async () => {
+                           try {
+                             await navigator.clipboard.writeText(asset.body);
+                             alert('已复制到剪贴板');
+                           } catch (err) {
+                             console.error('Copy failed', err);
+                           }
                          }}
                          className="flex-1 py-5 bg-[#1A1C1E] text-white rounded-2xl font-black text-sm uppercase tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all flex items-center justify-center gap-3"
                        >
@@ -2093,10 +2134,8 @@ ${result.winningStrategy}
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
 
       {/* Edit Profile Modal */}
-      <AnimatePresence>
         {isEditing && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -2262,7 +2301,6 @@ ${result.winningStrategy}
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

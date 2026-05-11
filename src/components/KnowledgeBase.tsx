@@ -34,7 +34,7 @@ import {
   ChevronUp,
   FileCode
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 
 function KnowledgeCard({ entry, idx, CatIcon, selectedEntries, setSelectedEntries, handleDelete }: any) {
@@ -85,10 +85,9 @@ function KnowledgeCard({ entry, idx, CatIcon, selectedEntries, setSelectedEntrie
           </span>
           <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest flex items-center gap-2">
              <Clock className="w-3.5 h-3.5" />
-             {entry.createdAt?.toDate ? entry.createdAt.toDate().toLocaleDateString('en-GB') : '刚刚'}
+             {entry.createdAt ? (entry.createdAt.toDate ? entry.createdAt.toDate().toISOString().split('T')[0] : new Date(entry.createdAt).toISOString().split('T')[0]) : '刚刚'}
           </span>
         </div>
-        <AnimatePresence>
           {isHovered && (
             <motion.button 
               initial={{ opacity: 0, scale: 0.8, x: 10 }}
@@ -103,7 +102,6 @@ function KnowledgeCard({ entry, idx, CatIcon, selectedEntries, setSelectedEntrie
                <Trash2 className="w-4 h-4" />
             </motion.button>
           )}
-        </AnimatePresence>
       </div>
 
       <h3 className="text-2xl font-bold tracking-tight text-[#1A1C1E] mb-4 leading-tight">{entry.title}</h3>
@@ -164,13 +162,13 @@ export default function KnowledgeBase() {
     if (!newEntry.content) return;
     setExtracting(true);
     try {
-      const data = await extractKnowledgeInsights(newEntry.content);
+      const data = JSON.parse(JSON.stringify(await extractKnowledgeInsights(newEntry.content)));
       
       setNewEntry(prev => ({
         ...prev,
         title: prev.title || data.suggestedTitle,
-        content: data.summary,
-        tags: data.tags.join(', '),
+        content: String(data.summary || ''),
+        tags: Array.isArray(data.tags) ? data.tags.join(', ') : String(data.tags || ''),
         category: data.category || prev.category
       }));
     } catch (err) {
@@ -181,11 +179,16 @@ export default function KnowledgeBase() {
   };
 
   const fetchData = async () => {
-    const data = await localDb.getAll('knowledge');
-    // Sort by updatedAt desc
-    data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    setEntries(data);
-    setLoading(false);
+    try {
+      const data = await localDb.getAll('knowledge');
+      // Sort by updatedAt desc
+      data.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      setEntries(data);
+      setLoading(false);
+    } catch (error) {
+      console.error("[KnowledgeBase] fetchData error:", error);
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -217,7 +220,8 @@ export default function KnowledgeBase() {
       // Build context from all current knowledge base entries
       const context = entries.map(e => `【${e.title}】: ${e.content}`).join('\n\n');
       const response = await queryKnowledgeBase(currentQuery, context);
-      setQaHistory(prev => [...prev, { role: 'ai', content: response }]);
+      const safeResponse = typeof response === 'string' ? response : JSON.stringify(response);
+      setQaHistory(prev => [...prev, { role: 'ai', content: safeResponse }]);
     } catch (err) {
       console.error(err);
       setQaHistory(prev => [...prev, { role: 'ai', content: '连接战略大脑失败，请检查网络或配置。' }]);
@@ -234,7 +238,7 @@ export default function KnowledgeBase() {
           .filter(e => selectedEntries.includes(e.id))
           .map(e => ({ title: e.title, content: e.content }));
       
-      const result = await generateStrategicPrompt(promptRequirements, sources);
+      const result = JSON.parse(JSON.stringify(await generateStrategicPrompt(promptRequirements, sources)));
       setPromptResult(result);
     } catch (err) {
       console.error(err);
@@ -277,49 +281,52 @@ export default function KnowledgeBase() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const user = await localAuth.getCurrentUserAsync();
-    if (!file || !user) return;
+    if (!file) return;
 
-    const fileName = file.name;
-    const fileExt = fileName.split('.').pop()?.toLowerCase();
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
 
-    if (fileExt === 'xlsx' || fileExt === 'xls') {
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const rawData: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
+      const fileName = file.name;
+      const fileExt = fileName.split('.').pop()?.toLowerCase();
 
-          for (const row of rawData) {
-            await localDb.add('knowledge', {
-              title: row['标题'] || row['Title'] || `来自 ${fileName}`,
-              content: row['内容'] || row['Content'] || JSON.stringify(row),
-              sourceType: 'excel',
-              tags: (row['标签'] || row['Tags'] || '').split(',').map((t: string) => t.trim()).filter(Boolean),
-              category: 'industry',
-              ownerId: user.uid
-            });
+      if (fileExt === 'xlsx' || fileExt === 'xls') {
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const rawData: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
+
+            for (const row of rawData) {
+              await localDb.add('knowledge', {
+                title: row['标题'] || row['Title'] || `来自 ${fileName}`,
+                content: row['内容'] || row['Content'] || JSON.stringify(row),
+                sourceType: 'excel',
+                tags: (row['标签'] || row['Tags'] || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+                category: 'industry',
+                ownerId: user.uid
+              });
+            }
+            await fetchData();
+            alert(`成功从 Excel 导入 ${rawData.length} 条知识点`);
+            setShowSuccess(true);
+            setTimeout(() => {
+              setShowSuccess(false);
+              setIsAdding(false);
+            }, 2000);
+          } catch (err) {
+            console.error(err);
+            alert('Excel 解析失败');
           }
-          await fetchData();
-          alert(`成功从 Excel 导入 ${rawData.length} 条知识点`);
-          setShowSuccess(true);
-          setTimeout(() => {
-            setShowSuccess(false);
-            setIsAdding(false);
-          }, 2000);
-        } catch (err) {
-          console.error(err);
-          alert('Excel 解析失败');
-        }
-      };
-      reader.readAsBinaryString(file);
-    } else {
-      // Text or other files
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        const text = evt.target?.result as string;
+        };
+        reader.readAsBinaryString(file);
+      } else {
+        // Text or other files
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          const text = evt.target?.result as string;
           setNewEntry({
             ...newEntry,
             title: fileName.replace(/\.[^/.]+$/, ""),
@@ -331,12 +338,17 @@ export default function KnowledgeBase() {
         };
         reader.readAsText(file);
       }
-    };
+    } catch (err) {
+      console.error("[KnowledgeBase] handleFileUpload error:", err);
+    }
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = await localAuth.getCurrentUserAsync();
     try {
+      const user = await localAuth.getCurrentUserAsync();
+      if (!user) return;
+      
       await localDb.add('knowledge', {
         ...newEntry,
         tags: newEntry.tags.split(',').map(t => t.trim()).filter(Boolean),
@@ -618,8 +630,7 @@ export default function KnowledgeBase() {
       </div>
 
       {/* Add Modal */}
-      <AnimatePresence>
-        {isAdding && (
+      {isAdding && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAdding(false)} className="absolute inset-0 bg-gray-900/40 backdrop-blur-md" />
             <motion.div 
@@ -747,11 +758,9 @@ export default function KnowledgeBase() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* Selected Action Bar */}
-      <AnimatePresence>
-        {selectedEntries.length > 0 && (
+      {selectedEntries.length > 0 && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -787,11 +796,9 @@ export default function KnowledgeBase() {
             </div>
           </motion.div>
         )}
-      </AnimatePresence>
 
       {/* Prompt Lab Modal */}
-      <AnimatePresence>
-        {isPromptLabOpen && (
+      {isPromptLabOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsPromptLabOpen(false)} className="absolute inset-0 bg-gray-900/60 backdrop-blur-md" />
             <motion.div 
@@ -864,10 +871,14 @@ export default function KnowledgeBase() {
                           </label>
                           <div className="flex items-center gap-2">
                              <button 
-                                onClick={() => {
-                                   navigator.clipboard.writeText(promptResult.promptContent);
-                                   alert('Prompt 已复制');
-                                }}
+                                 onClick={async () => {
+                                    try {
+                                       await navigator.clipboard.writeText(promptResult.promptContent);
+                                       alert('Prompt 已复制');
+                                    } catch (err) {
+                                       console.error(err);
+                                    }
+                                 }}
                                 className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm group"
                                 title="复制到剪贴板"
                              >
@@ -899,7 +910,6 @@ export default function KnowledgeBase() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }
