@@ -124,17 +124,31 @@ export interface AgentSkill {
   createdAt: any;
 }
 
+export interface Product {
+  id: string;
+  name: string;
+  industry: string;
+  coreValue: string;
+  targetUser: string;
+  usageScenario: string;
+  ownerId: string;
+  createdAt: any;
+}
+
 export interface AgentInteraction {
   id: string;
   clientId?: string; // Optional if global
   query: string;
-  response: {
+  type: 'reasoning' | 'lab';
+  result: {
     analysis: string;
-    decision: string;
-    recommendedAction: string;
-    generatedMessage: string;
-    usedSkills: string[];
-    confidence: number;
+    decision?: string;
+    recommendedAction?: string;
+    generatedMessage?: string;
+    usedSkills?: string[];
+    confidence?: number;
+    labResult?: string;
+    labType?: string;
   };
   feedback?: {
     score: number; // -2 to +2
@@ -172,4 +186,45 @@ export interface EvolutionProposal {
   status: 'pending' | 'approved' | 'rejected' | 'implemented';
   ownerId: string;
   createdAt: any;
+}
+
+export interface JourneyLog {
+  id: string;
+  productId: string;
+  productName: string;
+  customerMessage: string;
+  insight: any;
+  ownerId: string;
+  timestamp: any;
+}
+
+export interface ErrorLog {
+  id: string;
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  route?: string;
+  view?: string;
+  state?: any;
+  lastClickEvent?: {
+    tag: string;
+    id: string;
+    className: string;
+    text: string;
+    timestamp: number;
+  };
+  lastSetState?: {
+    component: string;
+    timestamp: number;
+  };
+  lastPromiseReject?: {
+    reason: any;
+    timestamp: number;
+  };
+  timestamp: string;
+  browserInfo: {
+    userAgent: string;
+    language: string;
+    platform: string;
+  };
 }

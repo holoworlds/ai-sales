@@ -26,6 +26,8 @@ import * as XLSX from 'xlsx';
 import { motion } from 'motion/react';
 import ClientDetails from './ClientDetails';
 
+import { useRenderTrace } from '../hooks/useRenderTrace';
+
 interface ClientManagerProps {
   initialClientId?: string | null;
   onClientClear?: () => void;
@@ -33,6 +35,8 @@ interface ClientManagerProps {
 
 export default function ClientManager({ initialClientId, onClientClear }: ClientManagerProps) {
   const [clients, setClients] = useState<Client[]>([]);
+  
+  useRenderTrace('ClientManager', { initialClientId, clientCount: clients.length });
   const [loading, setLoading] = useState(true);
   const [_error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');

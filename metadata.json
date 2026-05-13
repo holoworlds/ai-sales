@@ -1,6 +1,6 @@
 {
   "name": "Nexus AI: 认知进化与记忆系统",
-  "description": "基于认知科学构建的下一代智能 Agent 框架，具备长期记忆、动态战略规划和自主技能进化能力。",
+  "description": "基于认知科学构建的下一代智能 Agent 框架，集成全链路错误追踪、多产品战略旅程预测及闭环进化历史系统。",
   "requestFramePermissions": [
     "camera",
     "microphone"

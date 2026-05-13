@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
+import { useRenderTrace } from '../hooks/useRenderTrace';
+
 interface StrategicAdvisorProps {
   setCurrentView?: (view: 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey') => void;
   setSelectedClientId?: (id: string | null) => void;
@@ -44,8 +46,14 @@ interface StrategicAdvisorProps {
 }
 
 export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, minimal = false }: StrategicAdvisorProps) {
-  const [activeTab, setActiveTab] = useState<'agent' | 'skills' | 'evolution' | 'llm' | 'lab'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'skills' | 'evolution' | 'llm' | 'lab' | 'history'>('agent');
   
+  useRenderTrace('StrategicAdvisor', { activeTab, minimal });
+  
+  // Interaction History
+  const [interactionHistory, setInteractionHistory] = useState<AgentInteraction[]>([]);
+  const [viewingHistoryItem, setViewingHistoryItem] = useState<AgentInteraction | null>(null);
+
   // Lab State
   const [labType, setLabType] = useState<'PPT' | 'Report' | 'Strategy' | 'Prompt'>('Prompt');
   const [labReqs, setLabReqs] = useState('');
@@ -93,6 +101,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       const skillsData = await localDb.getAll('skills');
       const proposalsData = await localDb.getAll('proposals');
       const configsData = await localDb.getAll('llmConfigs');
+      const historyData = await localDb.getAll('agentLogs');
       
       setClients(clientsData);
       setKnowledge(knowledgeData);
@@ -101,6 +110,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       ));
       setLlmConfigs(configsData);
+      setInteractionHistory(historyData.sort((a: any, b: any) => 
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      ));
     } catch (error) {
       console.error("[StrategicAdvisor] fetchData error:", error);
       setError("从数据库读取数据失败，请重试。");
@@ -220,12 +232,16 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setQueryText('');
       
       const user = await localAuth.getCurrentUserAsync();
-      await localDb.add('agentLogs', {
+      const historyEntry: AgentInteraction = {
+        id: crypto.randomUUID(),
         type: 'reasoning',
         query: queryText,
-        result: JSON.parse(JSON.stringify(result)),
-        userId: user?.uid
-      });
+        result: dehydratedResult,
+        ownerId: user?.uid || 'local-user',
+        timestamp: new Date().toISOString()
+      };
+      await localDb.add('agentLogs', historyEntry);
+      setInteractionHistory([historyEntry, ...interactionHistory]);
     } catch (error: any) {
       console.error("Reasoning failed:", error);
       setError(error.message || 'AI 推理引擎发生严重错误');
@@ -358,6 +374,14 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
             >
                 <MessageSquarePlus className="w-6 h-6" />
                 {activeTab === 'lab' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-purple-500 rounded-full" />}
+            </button>
+            <button 
+              title="历史记录"
+              onClick={() => setActiveTab('history')}
+              className={`p-4 rounded-2xl transition-all relative group ${activeTab === 'history' ? 'bg-gray-600 text-white shadow-lg shadow-gray-600/20' : 'text-gray-500 hover:text-white'}`}
+            >
+                <History className="w-6 h-6" />
+                {activeTab === 'history' && <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1 h-3 bg-gray-500 rounded-full" />}
             </button>
             <button 
               title="模型枢纽"
@@ -614,7 +638,25 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                try {
                                   const { generateContentAsset } = await import('../services/gemini');
                                   const result = await generateContentAsset(labType as any, "系统全局上下文 (知识集 + 技能集)", labReqs);
-                                  setLabResult(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+                                  const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                                  setLabResult(resultText);
+
+                                  // Save to history
+                                  const user = await localAuth.getCurrentUserAsync();
+                                  const historyEntry: AgentInteraction = {
+                                    id: crypto.randomUUID(),
+                                    type: 'lab',
+                                    query: `[${labType}] ${labReqs}`,
+                                    result: {
+                                      analysis: "Asset generated via Lab",
+                                      labResult: resultText,
+                                      labType: labType
+                                    } as any,
+                                    ownerId: user?.uid || 'local-user',
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  await localDb.add('agentLogs', historyEntry);
+                                  setInteractionHistory([historyEntry, ...interactionHistory]);
                                } catch (err) { 
                                  console.error(err); 
                                  setLabResult("资产生成失败，请检查网络或模型配置。");
@@ -760,13 +802,13 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                    </div>
                                    <div className="text-[10px] text-gray-600">
                                       <span className="font-black uppercase mr-2 text-blue-500/50">Capability:</span>
-                                      <span className="line-clamp-1 italic">{proposal.missingCapability}</span>
+                                      <span className="line-clamp-1 italic text-gray-400">{proposal.missingCapability}</span>
                                    </div>
                                 </div>
                              </div>
-                             <div className="flex flex-col justify-center gap-4" onClick={(e) => e.stopPropagation()}>
-                                {proposal.status === 'pending' && <button onClick={() => approveProposal(proposal)} className="w-full py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-700 transition-all">批准并集成</button>}
-                                {proposal.status === 'implemented' && <div className="text-center py-4 bg-emerald-500/10 text-emerald-400 rounded-2xl text-[10px] font-black uppercase">已集成至系统</div>}
+                             <div className="flex flex-col items-center justify-center gap-4 border-l border-white/5 pl-10">
+                                <ArrowRight className="w-8 h-8 text-gray-800 group-hover:text-emerald-500 transition-all group-hover:translate-x-2" />
+                                <span className="text-[8px] font-black uppercase text-gray-800 group-hover:text-emerald-500">View Proposal</span>
                              </div>
                           </div>
                         ))
@@ -791,7 +833,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          <Plus className="w-3.5 h-3.5" /> 添加新模型配置
                       </button>
                    </div>
-
+                   
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       {llmConfigs.map(config => (
                         <div 
@@ -852,14 +894,153 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                               )}
                            </div>
                            <div className="absolute -bottom-4 -right-4 text-7xl font-black text-white/[0.02] pointer-events-none select-none italic uppercase">
-                               {config.provider}
+                                {config.provider}
                            </div>
                         </div>
                       ))}
                    </div>
                 </motion.div>
               )}
+
+              {activeTab === 'history' && (
+                <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
+                   <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-3xl font-bold tracking-tight mb-2">研讨历史 (Agent Logs)</h2>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                           <Clock className="w-3 h-3" /> Historical Decision & Generation Logs
+                        </p>
+                      </div>
+                      <button 
+                        onClick={async () => {
+                          if (confirm('确定要清空所有历史记录吗？')) {
+                            const logs = await localDb.getAll('agentLogs');
+                            for (const log of logs) {
+                              await localDb.delete('agentLogs', log.id);
+                            }
+                            setInteractionHistory([]);
+                          }
+                        }}
+                        className="px-4 py-2 bg-red-900/10 text-red-400 border border-red-800/20 rounded-xl text-[10px] font-black uppercase hover:bg-red-900/20 transition-all"
+                      >
+                         清空记录
+                      </button>
+                   </div>
+
+                   <div className="space-y-4">
+                      {interactionHistory.length === 0 ? (
+                        <div className="py-20 text-center opacity-20">
+                          <History className="w-16 h-16 mx-auto mb-4" />
+                          <p className="text-sm font-bold uppercase tracking-widest">暂无历史记录</p>
+                        </div>
+                      ) : (
+                        interactionHistory.map(item => (
+                          <div 
+                            key={item.id}
+                            onClick={() => setViewingHistoryItem(item)}
+                            className="bg-white/5 border border-white/10 p-6 rounded-3xl hover:bg-white/10 transition-all cursor-pointer flex items-center justify-between group"
+                          >
+                            <div className="flex items-center gap-6">
+                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${item.type === 'reasoning' ? 'bg-blue-600/20 text-blue-400' : 'bg-purple-600/20 text-purple-400'}`}>
+                                {item.type === 'reasoning' ? <TrendingUp className="w-6 h-6" /> : <MessageSquarePlus className="w-6 h-6" />}
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-bold text-gray-200 line-clamp-1 mb-1">{item.query}</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-[9px] font-black uppercase text-gray-500 tracking-widest">
+                                    {new Date(item.timestamp).toLocaleString()}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${item.type === 'reasoning' ? 'bg-blue-600/20 text-blue-300' : 'bg-purple-600/20 text-purple-300'}`}>
+                                    {item.type === 'reasoning' ? 'Strategic Reasoning' : 'Asset Generation'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-white transition-all group-hover:translate-x-1" />
+                          </div>
+                        ))
+                      )}
+                   </div>
+                </motion.div>
+              )}
         </div>
+
+           {viewingHistoryItem && (
+             <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-gray-900/90 backdrop-blur-xl">
+               <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1A1C1E] border border-white/10 rounded-[3rem] w-full max-w-4xl relative p-12 text-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar flex flex-col">
+                  <button onClick={() => setViewingHistoryItem(null)} className="absolute top-10 right-10 text-gray-500 hover:text-white"><XCircle className="w-8 h-8" /></button>
+                  
+                  <div className="flex items-center gap-6 mb-10 shrink-0">
+                    <div className={`w-16 h-16 rounded-3xl flex items-center justify-center shadow-lg ${viewingHistoryItem.type === 'reasoning' ? 'bg-blue-600/20 text-blue-400' : 'bg-purple-600/20 text-purple-400'}`}>
+                      {viewingHistoryItem.type === 'reasoning' ? <TrendingUp className="w-8 h-8" /> : <MessageSquarePlus className="w-8 h-8" />}
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold mb-2">历史记录详情</h3>
+                      <div className="flex items-center gap-4">
+                        <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">{new Date(viewingHistoryItem.timestamp).toLocaleString()}</span>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${viewingHistoryItem.type === 'reasoning' ? 'bg-blue-600/20 text-blue-300' : 'bg-purple-600/20 text-purple-300'}`}>
+                          {viewingHistoryItem.type === 'reasoning' ? 'Strategic reasoning' : 'Lab Asset'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-8 flex-1">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2 block">原始指令 (Original Query)</label>
+                      <div className="p-6 bg-white/5 rounded-2xl border border-white/5 text-sm italic text-gray-100">
+                        "{viewingHistoryItem.query}"
+                      </div>
+                    </div>
+
+                    {viewingHistoryItem.type === 'reasoning' ? (
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="md:col-span-2 bg-blue-600/5 border border-blue-500/20 p-8 rounded-3xl">
+                            <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-400">
+                              <BarChart3 className="w-5 h-5" /> 核心决策
+                            </h4>
+                            <div className="font-bold text-gray-100 mb-4">{viewingHistoryItem.result.decision}</div>
+                            <div className="text-sm text-gray-400 leading-relaxed mb-6">{viewingHistoryItem.result.analysis}</div>
+                            <div className="p-4 bg-blue-600 shadow-xl shadow-blue-600/20 rounded-2xl text-sm font-bold">
+                              {viewingHistoryItem.result.recommendedAction}
+                            </div>
+                          </div>
+                          <div className="bg-white/5 border border-white/5 p-8 rounded-3xl">
+                            <h4 className="text-[10px] font-black tracking-widest text-gray-500 mb-6 uppercase">命中的能力</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {(viewingHistoryItem.result.usedSkills || []).map((s: any) => (
+                                <span key={s} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[9px] font-bold text-gray-300">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4 block">生成的资产 (Generated Asset - {viewingHistoryItem.result.labType})</label>
+                        <div className="bg-black/40 p-8 rounded-3xl border border-white/10 font-mono text-xs leading-relaxed text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                          {viewingHistoryItem.result.labResult}
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                           <button 
+                             onClick={() => {
+                               navigator.clipboard.writeText(viewingHistoryItem.result.labResult || '');
+                               alert('已复制到剪贴板');
+                             }}
+                             className="px-6 py-3 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-purple-700 transition-all"
+                           >
+                             <Plus className="w-4 h-4" /> 复制资产
+                           </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+               </motion.div>
+             </div>
+           )}
 
            {selectedSkill && (
              <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-gray-900/80 backdrop-blur-md">

@@ -1,5 +1,9 @@
 import { useState, useEffect, Component, ReactNode } from 'react';
 import { localAuth } from './services/storage';
+import { AppLogger } from './services/logger';
+import { ErrorLog } from './types';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { useRenderTrace } from './hooks/useRenderTrace';
 import { 
   LayoutDashboard, 
   Users, 
@@ -11,7 +15,8 @@ import {
   Sparkles,
   Search,
   Bell,
-  Cpu
+  Cpu,
+  History
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -67,11 +72,26 @@ export default function App() {
     return localStorage.getItem('nexus_selected_client_id');
   });
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [hasError, setHasError] = useState<string | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [persistentLogs, setPersistentLogs] = useState<ErrorLog[]>([]);
+
+  useRenderTrace('App', { currentView, selectedClientId, user: !!user });
+
+  useEffect(() => {
+    AppLogger.updateContext(undefined, currentView, { user: user?.uid });
+  }, [currentView, user]);
 
   useEffect(() => {
     localStorage.setItem('nexus_current_view', currentView);
   }, [currentView]);
+
+  useEffect(() => {
+    if (showDebugPanel) {
+      AppLogger.getLogs().then(logs => {
+        setPersistentLogs(logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+      });
+    }
+  }, [showDebugPanel]);
 
   useEffect(() => {
     if (selectedClientId) {
@@ -85,30 +105,24 @@ export default function App() {
     const handleError = (error: ErrorEvent) => {
       // Ignore some non-critical SES warnings or known benign errors
       if (error.message?.includes('SES Removing unpermitted intrinsics')) {
-        console.warn('SES Non-fatal Warning:', error.message);
         return;
       }
       
-      console.error('App Runtime Error:', error);
-      // Only trigger global error if it's likely a fatal rendering issue
-      if (error.filename?.includes('main.tsx') || error.message?.includes('render')) {
-        const errorMsg = error.error?.message || error.message || 'Unknown Error';
-        setHasError(errorMsg);
-      }
+      AppLogger.logError(error.error || new Error(error.message), {
+        message: error.message,
+        browserInfo: {
+          userAgent: navigator.userAgent,
+          language: navigator.language,
+          platform: navigator.platform
+        }
+      });
     };
 
     const handlePromiseRejection = (event: PromiseRejectionEvent) => {
       console.error('Unhandled Promise Rejection:', event.reason);
-      
-      // If it's an AI or database error, we show it but don't necessarily crash the whole UI
-      const errorMsg = event.reason?.message || String(event.reason) || 'Unknown Promise Error';
-      
-      // Check if it's already caught by a component (via some custom property we could add)
-      // but for now, let's just log. To satisfy the user's "Don't jump back to home", 
-      // we don't setHasError here unless it's a critical auth or db connection failure.
-      if (errorMsg.includes('auth') || errorMsg.includes('database connection')) {
-         setHasError(errorMsg);
-      }
+      AppLogger.trackPromiseReject(event.reason);
+      const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+      AppLogger.logError(error);
     };
 
     window.addEventListener('error', handleError);
@@ -227,37 +241,6 @@ export default function App() {
     );
   }
 
-  if (hasError) {
-    return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-6">
-          <X className="w-8 h-8 text-red-600" />
-        </div>
-        <h2 className="text-2xl font-bold mb-2">系统遇到一个关键性错误</h2>
-        <p className="text-gray-500 mb-6 max-w-md">当前渲染过程中发生了未预期的异常。为了保护您的数据安全，系统已进入防护模式。</p>
-        <div className="bg-red-50 border border-red-100 p-4 rounded-xl mb-8 max-w-md w-full shadow-sm">
-           <p className="text-[10px] font-mono text-left text-red-600 break-words line-clamp-6 leading-relaxed">
-             {hasError}
-           </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button 
-            onClick={() => setHasError(null)}
-            className="px-8 py-3 bg-white border border-gray-200 text-gray-900 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-gray-50 transition-colors"
-          >
-            关闭错误提示
-          </button>
-          <button 
-            onClick={() => window.location.reload()}
-            className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
-          >
-            尝试重新激活
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const navItems = [
     { id: 'dashboard', label: '控制中心', icon: LayoutDashboard },
     { id: 'agent', label: '认知演进', icon: Cpu },
@@ -266,14 +249,16 @@ export default function App() {
     { id: 'knowledge', label: '智能知识库', icon: BookOpen },
   ];
 
+  // Main Content
   return (
-    <div className="flex h-screen bg-[#F5F7FA] text-[#1A1C1E] font-sans selection:bg-blue-600 selection:text-white">
-      {/* Sidebar */}
-      <motion.aside 
-        initial={false}
-        animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        className="bg-white border-r border-gray-200 flex flex-col overflow-hidden"
-      >
+    <ErrorBoundary>
+      <div className="flex h-screen bg-[#F5F7FA] text-[#1A1C1E] font-sans selection:bg-blue-600 selection:text-white">
+        {/* Sidebar */}
+        <motion.aside 
+          initial={false}
+          animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          className="bg-white border-r border-gray-200 flex flex-col overflow-hidden"
+        >
         <div className="p-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-100">
@@ -360,37 +345,121 @@ export default function App() {
 
         {/* View Content */}
         <div className="flex-1 overflow-auto p-4 lg:p-6">
-          <LocalErrorBoundary key={currentView}>
-            <motion.div
-              key={currentView}
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.2 }}
-              className="h-full"
-            >
-              {currentView === 'dashboard' && (
-                <Dashboard 
-                  setCurrentView={setCurrentView} 
-                  setSelectedClientId={setSelectedClientId} 
-                />
-              )}
-              {currentView === 'agent' && (
-                <StrategicAdvisor 
-                  setCurrentView={setCurrentView} 
-                  setSelectedClientId={setSelectedClientId} 
-                />
-              )}
-              {currentView === 'clients' && (
-                <ClientManager 
-                  initialClientId={selectedClientId} 
-                  onClientClear={() => setSelectedClientId(null)} 
-                />
-              )}
-              {currentView === 'knowledge' && <KnowledgeBase />}
-              {currentView === 'journey' && <JourneyGenerator />}
-            </motion.div>
-          </LocalErrorBoundary>
+          <motion.div
+            key={currentView}
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.2 }}
+            className="h-full"
+          >
+            {currentView === 'dashboard' && (
+              <Dashboard 
+                setCurrentView={setCurrentView} 
+                setSelectedClientId={setSelectedClientId} 
+              />
+            )}
+            {currentView === 'agent' && (
+              <StrategicAdvisor 
+                setCurrentView={setCurrentView} 
+                setSelectedClientId={setSelectedClientId} 
+              />
+            )}
+            {currentView === 'clients' && (
+              <ClientManager 
+                initialClientId={selectedClientId} 
+                onClientClear={() => setSelectedClientId(null)} 
+              />
+            )}
+            {currentView === 'knowledge' && <KnowledgeBase />}
+            {currentView === 'journey' && <JourneyGenerator />}
+          </motion.div>
         </div>
+
+        {/* Debug Panel Toggle */}
+        <button 
+          onClick={() => setShowDebugPanel(!showDebugPanel)}
+          className="fixed bottom-4 right-4 z-[9999] w-10 h-10 bg-gray-900 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform"
+        >
+          <History className="w-5 h-5" />
+        </button>
+
+        {showDebugPanel && (
+          <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-end justify-end p-4 pointer-events-none">
+            <div className="w-full max-w-2xl h-[80vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col pointer-events-auto overflow-hidden">
+              <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-800/50">
+                <h3 className="text-white font-bold flex items-center gap-2">
+                  <History className="w-4 h-4 text-blue-400" /> 
+                  Nexus 持久化黑匣子 (Persistent Error Logs)
+                </h3>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={async () => {
+                      if (confirm('确定要清空所有持久化日志吗？')) {
+                        await AppLogger.clearLogs();
+                        setPersistentLogs([]);
+                      }
+                    }}
+                    className="px-3 py-1 bg-red-900/30 text-red-400 border border-red-800 rounded-lg text-xs font-bold"
+                  >
+                    清除日志
+                  </button>
+                  <button 
+                    onClick={() => setShowDebugPanel(false)}
+                    className="p-1 text-gray-500 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 font-mono text-[11px] space-y-4 no-scrollbar">
+                {persistentLogs.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-600 opacity-20 italic">
+                    暂无持久化错误记录
+                  </div>
+                ) : (
+                  persistentLogs.map((log) => (
+                    <div key={log.id} className="p-4 rounded-xl border border-white/5 bg-white/5 space-y-3">
+                      <div className="flex justify-between items-start opacity-50 text-[9px] font-black uppercase tracking-widest">
+                        <span className="text-red-400 font-bold">{new Date(log.timestamp).toLocaleString()}</span>
+                        <span>View: {log.view || 'N/A'}</span>
+                      </div>
+                      <div className="text-gray-100 font-bold text-xs">{log.message}</div>
+                      
+                      {log.lastClickEvent && (
+                        <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20 text-blue-300 text-[10px]">
+                           Last Click: [{log.lastClickEvent.tag}] {log.lastClickEvent.text}
+                        </div>
+                      )}
+
+                      {log.stack && (
+                        <details className="cursor-pointer group">
+                          <summary className="text-gray-500 hover:text-gray-300 transition-colors">View Stack Trace</summary>
+                          <pre className="mt-2 text-red-400/60 overflow-x-auto p-3 bg-black/40 rounded-lg text-[9px]">
+                            {log.stack}
+                          </pre>
+                        </details>
+                      )}
+
+                      {log.componentStack && (
+                         <details className="cursor-pointer group">
+                           <summary className="text-gray-500 hover:text-gray-300 transition-colors">View Component Stack</summary>
+                           <pre className="mt-2 text-indigo-400/60 overflow-x-auto p-3 bg-black/40 rounded-lg text-[9px]">
+                             {log.componentStack}
+                           </pre>
+                         </details>
+                      )}
+
+                      <div className="flex gap-4 opacity-40 text-[8px] uppercase tracking-tighter">
+                        <span>UA: {log.browserInfo.userAgent.substring(0, 30)}...</span>
+                        <span>State Object: {log.state ? 'YES' : 'NO'}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <footer className="h-10 bg-white border-t border-gray-200 px-8 flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase tracking-widest shrink-0">
@@ -404,5 +473,6 @@ export default function App() {
         </footer>
       </main>
     </div>
-  );
+  </ErrorBoundary>
+);
 }

@@ -18,6 +18,8 @@ import {
   Workflow
 } from 'lucide-react';
 
+import { useRenderTrace } from '../hooks/useRenderTrace';
+
 interface DashboardProps {
   setCurrentView: (view: 'dashboard' | 'agent' | 'clients' | 'knowledge' | 'journey') => void;
   setSelectedClientId: (id: string | null) => void;
@@ -25,6 +27,8 @@ interface DashboardProps {
 
 export default function Dashboard({ setCurrentView, setSelectedClientId }: DashboardProps) {
   const [clients, setClients] = useState<Client[]>([]);
+  
+  useRenderTrace('Dashboard', { clientCount: clients.length });
   const [skillCount, setSkillCount] = useState(0);
   const [proposalCount, setProposalCount] = useState(0);
   const [loading, setLoading] = useState(true);
