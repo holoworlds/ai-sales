@@ -27,7 +27,8 @@ import {
   ArrowRight,
   Settings,
   Activity,
-  Shield,
+  Shield, 
+  Edit2,
   Layers,
   Globe,
   Database as DbIcon,
@@ -53,6 +54,8 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   // Interaction History
   const [interactionHistory, setInteractionHistory] = useState<AgentInteraction[]>([]);
   const [viewingHistoryItem, setViewingHistoryItem] = useState<AgentInteraction | null>(null);
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [editingHistoryName, setEditingHistoryName] = useState('');
 
   // Lab State
   const [labType, setLabType] = useState<'PPT' | 'Report' | 'Strategy' | 'Prompt'>('Prompt');
@@ -99,9 +102,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       const clientsData = await localDb.getAll('clients');
       const knowledgeData = await localDb.getAll('knowledge');
       const skillsData = await localDb.getAll('skills');
-      const proposalsData = await localDb.getAll('proposals');
-      const configsData = await localDb.getAll('llmConfigs');
-      const historyData = await localDb.getAll('agentLogs');
+      const proposalsData = await localDb.getAll('evolution_proposals');
+      const configsData = await localDb.getAll('llm_configs');
+      const historyData = await localDb.getAll('agent_logs'); 
       
       setClients(clientsData);
       setKnowledge(knowledgeData);
@@ -130,7 +133,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
          isPrimary: c.modelId === modelId
       }));
       for (const config of updated) {
-         await localDb.update('llmConfigs', config.id, config);
+         await localDb.update('llm_configs', config.id, config);
       }
       setLlmConfigs(updated);
     } catch (error) {
@@ -146,7 +149,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
          isPrimary: c.id === id
       }));
       for (const config of updated) {
-         await localDb.update('llmConfigs', config.id, config);
+         await localDb.update('llm_configs', config.id, config);
       }
       setLlmConfigs(updated);
     } catch (error) {
@@ -170,7 +173,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         status: 'Active',
         ownerId: user?.uid || 'local-user'
       } as any; 
-      await localDb.add('llmConfigs', config);
+      await localDb.add('llm_configs', config);
       setLlmConfigs([...llmConfigs, config]);
       setIsAddingLLM(false);
       setNewLLM({
@@ -189,11 +192,25 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
   const deleteLLM = async (id: string) => {
     try {
-      await localDb.delete('llmConfigs', id);
+      await localDb.delete('llm_configs', id);
       setLlmConfigs(llmConfigs.filter(c => c.id !== id));
     } catch (error) {
       console.error("[StrategicAdvisor] deleteLLM error:", error);
       setError("删除模型配置失败");
+    }
+  };
+
+  const updateHistoryName = async (id: string) => {
+    if (!editingHistoryName.trim()) return;
+    try {
+      await localDb.update('agent_logs', id, { query: editingHistoryName });
+      setInteractionHistory(interactionHistory.map(item => 
+        item.id === id ? { ...item, query: editingHistoryName } : item
+      ));
+      setEditingHistoryId(null);
+    } catch (err) {
+      console.error("Rename history failed:", err);
+      setError("重命名失败");
     }
   };
 
@@ -212,18 +229,20 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         { clients, knowledge, skills }
       );
       
+      let dehydratedResult: any = null;
       if (result?.error) {
         setError(result.message || 'AI 推理暂时不可用');
-        setReasoningResult(JSON.parse(JSON.stringify({
+        dehydratedResult = {
           decision: '推理受阻',
           analysis: result.message || '由于模型响应异常，Agent 无法完成该指令的推理。建议检查模型 API 配置。',
           recommendedAction: '重试或更换模型',
           generatedMessage: '系统错误',
           confidence: 0,
           usedSkills: []
-        })));
+        };
+        setReasoningResult(dehydratedResult);
       } else {
-        const dehydratedResult = JSON.parse(JSON.stringify(result));
+        dehydratedResult = JSON.parse(JSON.stringify(result));
         setReasoningResult(dehydratedResult);
         if (dehydratedResult?.suggestedSystemAction) {
           setPendingAction(dehydratedResult.suggestedSystemAction);
@@ -231,17 +250,15 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       }
       setQueryText('');
       
-      const user = await localAuth.getCurrentUserAsync();
-      const historyEntry: AgentInteraction = {
+      const historyEntry: Partial<AgentInteraction> = {
         id: crypto.randomUUID(),
         type: 'reasoning',
         query: queryText,
         result: dehydratedResult,
-        ownerId: user?.uid || 'local-user',
-        timestamp: new Date().toISOString()
+        ownerId: localAuth.getCurrentUser()?.uid || 'local-user'
       };
-      await localDb.add('agentLogs', historyEntry);
-      setInteractionHistory([historyEntry, ...interactionHistory]);
+      const savedEntry = await localDb.add('agent_logs', historyEntry); 
+      if (savedEntry) setInteractionHistory([savedEntry as AgentInteraction, ...interactionHistory]);
     } catch (error: any) {
       console.error("Reasoning failed:", error);
       setError(error.message || 'AI 推理引擎发生严重错误');
@@ -284,26 +301,70 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       
       const result = JSON.parse(JSON.stringify(rawResult));
       setEvaluationResult(result);
-      
-      if (result.isAccepted) {
-        const proposal: EvolutionProposal = {
-          id: crypto.randomUUID(),
-          ...(result.refinedProposal || {}),
-          status: 'pending',
-          isManual: true,
-          createdAt: new Date()
-        };
-        await localDb.add('proposals', proposal);
-        await fetchData();
-      }
-      
-      setTimeout(() => {
-        setIsAddingProposal(false);
-        setEvaluationResult(null);
-        setManualProposal({ name: '', description: '', goal: '' });
-      }, 3000);
+      // Wait for user confirmation in UI now
     } catch (err) {
       console.error(err);
+      setError("注入失败，请检查网络或配置");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const finalizeManualProposal = async () => {
+    if (!evaluationResult || !evaluationResult.isAccepted) return;
+    setIsEvaluating(true);
+    try {
+      const user = await localAuth.getCurrentUserAsync();
+      const proposalId = crypto.randomUUID();
+      const proposal: any = {
+        id: proposalId,
+        ...(evaluationResult.refinedProposal || {}),
+        status: 'pending',
+        isManual: true,
+        ownerId: user?.uid
+      };
+      await localDb.add('evolution_proposals', proposal);
+      
+      const skillId = crypto.randomUUID();
+      const newSkill: any = {
+        id: skillId,
+        name: evaluationResult?.refinedProposal?.suggestedSkillName || manualProposal.name,
+        description: evaluationResult?.refinedProposal?.suggestedSkillDescription || manualProposal.description,
+        logic: evaluationResult?.refinedProposal?.suggestedSkillLogic || "Generated logic for " + manualProposal.name,
+        type: 'evolved',
+        performanceScore: 0.85,
+        usageCount: 0,
+        applicablePhases: ['Any'],
+        ownerId: user?.uid
+      };
+
+      await localDb.add('skills', newSkill);
+      
+      await localDb.update('evolution_proposals', proposalId, {
+        status: 'implemented'
+      });
+
+      await localDb.add('agent_logs', {
+        id: crypto.randomUUID(),
+        type: 'reasoning',
+        query: '手动注入进化提案: ' + manualProposal.name,
+        result: {
+          analysis: evaluationResult.evaluation,
+          decision: 'ACCEPT',
+          recommendedAction: '系统能力已扩充: ' + newSkill.name
+        },
+        timestamp: new Date().toISOString(),
+        ownerId: user?.uid
+      } as any);
+      
+      await fetchData();
+      setIsAddingProposal(false);
+      setEvaluationResult(null);
+      setManualProposal({ name: '', description: '', goal: '' });
+      setActiveTab('evolution');
+    } catch (err) {
+      console.error("[StrategicAdvisor] finalizeManualProposal error:", err);
+      setError("保存提案失败: " + (err instanceof Error ? err.message : "未知错误"));
     } finally {
       setIsEvaluating(false);
     }
@@ -325,7 +386,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         performanceScore: 0.8,
         usageCount: 0
       });
-      await localDb.update('proposals', proposal.id, {
+      await localDb.update('evolution_proposals', proposal.id, {
         status: 'implemented'
       });
       await fetchData();
@@ -613,21 +674,21 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                   <button 
                                     key={type}
                                     onClick={() => setLabType(type as any)}
-                                    className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${labType === type ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/20' : 'bg-white/5 border-white/10 text-gray-400'}`}
+                                    className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${labType === type ? 'bg-purple-600 border-purple-500 text-white shadow-lg' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'}`}
                                   >
-                                     {type}
+                                    {type}
                                   </button>
                                ))}
                             </div>
                          </div>
 
                          <div className="space-y-4">
-                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 px-2">需求描述 (Requirements)</label>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 px-2">资产核心指令 (Core Requirements)</label>
                             <textarea 
                                value={labReqs}
                                onChange={e => setLabReqs(e.target.value)}
                                className="w-full h-48 bg-white/5 border border-white/10 rounded-3xl p-8 text-sm text-white focus:bg-white/10 focus:border-purple-500 outline-none transition-all resize-none"
-                               placeholder="描述您需要生成的资产内容，例如：针对医疗科技行业的 PPT 大纲，或者一个能够自动提取财报关键指标的 Prompt..."
+                               placeholder="描述您需要生成的资产内容，例如：针对医疗器械行业的 Phase 2 客户生成一份深度分析报告，重点突破「现状惯性」阻力点..."
                             />
                          </div>
 
@@ -637,13 +698,12 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                setIsGeneratingLab(true);
                                try {
                                   const { generateContentAsset } = await import('../services/gemini');
-                                  const result = await generateContentAsset(labType as any, "系统全局上下文 (知识集 + 技能集)", labReqs);
-                                  const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                                  const response = await generateContentAsset(labType, JSON.stringify({ clients, knowledge, skills }), labReqs);
+                                  const resultText = typeof response === 'string' ? response : response.message;
                                   setLabResult(resultText);
 
-                                  // Save to history
-                                  const user = await localAuth.getCurrentUserAsync();
-                                  const historyEntry: AgentInteraction = {
+                                  const user = localAuth.getCurrentUser();
+                                  const historyEntry: Partial<AgentInteraction> = {
                                     id: crypto.randomUUID(),
                                     type: 'lab',
                                     query: `[${labType}] ${labReqs}`,
@@ -652,14 +712,13 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                       labResult: resultText,
                                       labType: labType
                                     } as any,
-                                    ownerId: user?.uid || 'local-user',
-                                    timestamp: new Date().toISOString()
+                                    ownerId: user?.uid || 'local-user'
                                   };
-                                  await localDb.add('agentLogs', historyEntry);
-                                  setInteractionHistory([historyEntry, ...interactionHistory]);
+                                  const savedEntry = await localDb.add('agent_logs', historyEntry); 
+                                  if (savedEntry) setInteractionHistory([savedEntry as AgentInteraction, ...interactionHistory]);
                                } catch (err) { 
-                                 console.error(err); 
-                                 setLabResult("资产生成失败，请检查网络或模型配置。");
+                                  console.error(err); 
+                                  setLabResult("资产生成失败，请检查网络或模型配置。");
                                }
                                finally { setIsGeneratingLab(false); }
                             }}
@@ -914,9 +973,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                       <button 
                         onClick={async () => {
                           if (confirm('确定要清空所有历史记录吗？')) {
-                            const logs = await localDb.getAll('agentLogs');
+                            const logs = await localDb.getAll('agent_logs'); // Updated path
                             for (const log of logs) {
-                              await localDb.delete('agentLogs', log.id);
+                              await localDb.delete('agent_logs', log.id); // Updated path
                             }
                             setInteractionHistory([]);
                           }
@@ -944,12 +1003,41 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${item.type === 'reasoning' ? 'bg-blue-600/20 text-blue-400' : 'bg-purple-600/20 text-purple-400'}`}>
                                 {item.type === 'reasoning' ? <TrendingUp className="w-6 h-6" /> : <MessageSquarePlus className="w-6 h-6" />}
                               </div>
-                              <div>
-                                <h4 className="text-sm font-bold text-gray-200 line-clamp-1 mb-1">{item.query}</h4>
-                                <div className="flex items-center gap-3">
-                                  <span className="text-[9px] font-black uppercase text-gray-500 tracking-widest">
-                                    {new Date(item.timestamp).toLocaleString()}
-                                  </span>
+                               <div className="flex-1">
+                                 {editingHistoryId === item.id ? (
+                                   <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                      <input 
+                                        autoFocus
+                                        value={editingHistoryName}
+                                        onChange={e => setEditingHistoryName(e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') updateHistoryName(item.id);
+                                          if (e.key === 'Escape') setEditingHistoryId(null);
+                                        }}
+                                        className="flex-1 bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm outline-none focus:border-blue-500"
+                                      />
+                                      <button onClick={() => updateHistoryName(item.id)} title="保存" className="text-emerald-500 p-1"><CheckCircle2 className="w-4 h-4" /></button>
+                                      <button onClick={() => setEditingHistoryId(null)} title="取消" className="text-gray-500 p-1"><XCircle className="w-4 h-4" /></button>
+                                   </div>
+                                 ) : (
+                                   <div className="flex items-center gap-2">
+                                      <h4 className="text-sm font-bold text-gray-200 line-clamp-1 truncate">{item.query}</h4>
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingHistoryId(item.id);
+                                          setEditingHistoryName(item.query);
+                                        }}
+                                        className="text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                   </div>
+                                 )}
+                                 <div className="flex items-center gap-3">
+                            <div className="text-[10px] font-black uppercase text-gray-500 tracking-widest">
+                                    {new Date(item.createdAt?.seconds ? item.createdAt.seconds * 1000 : item.createdAt || item.timestamp).toLocaleString()}
+                                  </div>
                                   <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${item.type === 'reasoning' ? 'bg-blue-600/20 text-blue-300' : 'bg-purple-600/20 text-purple-300'}`}>
                                     {item.type === 'reasoning' ? 'Strategic Reasoning' : 'Asset Generation'}
                                   </span>
@@ -977,7 +1065,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                     <div>
                       <h3 className="text-xl font-bold mb-2">历史记录详情</h3>
                       <div className="flex items-center gap-4">
-                        <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">{new Date(viewingHistoryItem.timestamp).toLocaleString()}</span>
+                        <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">
+                          {new Date(viewingHistoryItem.createdAt?.seconds ? viewingHistoryItem.createdAt.seconds * 1000 : viewingHistoryItem.createdAt || viewingHistoryItem.timestamp).toLocaleString()}
+                        </span>
                         <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${viewingHistoryItem.type === 'reasoning' ? 'bg-blue-600/20 text-blue-300' : 'bg-purple-600/20 text-purple-300'}`}>
                           {viewingHistoryItem.type === 'reasoning' ? 'Strategic reasoning' : 'Lab Asset'}
                         </span>
@@ -1236,9 +1326,41 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                          <div className={`p-8 rounded-3xl border ${evaluationResult.isAccepted ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
                             <h4 className="text-lg font-bold mb-4">{evaluationResult.isAccepted ? '系统已接思接纳并补全' : '提案被拒绝'}</h4>
                             <p className="text-sm text-gray-400 leading-relaxed mb-6">{evaluationResult.evaluation}</p>
-                            {evaluationResult.isAccepted && <div className="text-white font-bold">补全能力: 「{evaluationResult.refinedProposal.suggestedSkillName}」</div>}
+                            {evaluationResult.isAccepted && (
+                               <div className="space-y-4">
+                                 <div className="text-white font-bold">补全能力: 「{evaluationResult.refinedProposal.suggestedSkillName}」</div>
+                                 <div className="p-4 bg-black/40 rounded-xl border border-white/5 font-mono text-[10px] text-gray-400 leading-relaxed max-h-40 overflow-y-auto no-scrollbar">
+                                   {evaluationResult.refinedProposal.suggestedSkillDescription}
+                                 </div>
+                               </div>
+                            )}
                          </div>
-                         <div className="text-xs text-gray-500 text-center">3秒后返回进化中心...</div>
+                         <div className="flex gap-4">
+                            {evaluationResult.isAccepted ? (
+                              <>
+                                <button 
+                                  onClick={finalizeManualProposal}
+                                  disabled={isEvaluating}
+                                  className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                                >
+                                  {isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} 确认并集成
+                                </button>
+                                <button 
+                                  onClick={() => setEvaluationResult(null)}
+                                  className="flex-1 py-4 bg-white/5 text-gray-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-white/10 transition-all"
+                                >
+                                  废弃
+                                </button>
+                              </>
+                            ) : (
+                               <button 
+                                 onClick={() => setEvaluationResult(null)}
+                                 className="w-full py-4 bg-white/10 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-white/20 transition-all"
+                               >
+                                 返回修改
+                               </button>
+                            )}
+                         </div>
                       </div>
                    ) : (
                       <form onSubmit={handleManualInject} className="space-y-6">

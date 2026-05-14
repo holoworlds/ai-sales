@@ -1,33 +1,72 @@
 
 import { v4 as uuidv4 } from 'uuid';
+import { initializeApp, getApps } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  getDoc, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where,
+  getDocFromServer,
+  serverTimestamp
+} from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
 
-// full-stack implementation using server-side local file storage
-// as requested: "数据应该存储在本地，不要存储在浏览器里"
+// Initialize Firebase
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const db = getFirestore(app);
+const auth = getAuth(app);
 
-const API_BASE = '/api/db';
-
-  const safeJson = async (res: Response) => {
-    try {
-      const text = await res.text();
-      if (!text || text.trim().startsWith('<!doctype') || text.trim().startsWith('<html')) {
-        return null;
-      }
-      return JSON.parse(text);
-    } catch (err) {
-      // Only log if it's actually supposed to be JSON but failed
-      return null;
+// Test Connection as per critical directive
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration.");
     }
+  }
+}
+testConnection();
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous
+    },
+    operationType,
+    path
   };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export const localDb = {
-  getCollection: async (collectionName: string) => {
+  getCollection: async (collectionName: string): Promise<any[]> => {
     try {
-      const res = await fetch(`${API_BASE}/${collectionName}`);
-      if (!res.ok) return [];
-      const data = await safeJson(res);
-      return data || [];
+      const snap = await getDocs(collection(db, collectionName));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
     } catch (err) {
-      console.error(`[localDb] getCollection error for ${collectionName}:`, err);
+      handleFirestoreError(err, OperationType.LIST, collectionName);
       return [];
     }
   },
@@ -37,93 +76,96 @@ export const localDb = {
   },
 
   getOne: async (collectionName: string, id: string) => {
-    const collection = await localDb.getCollection(collectionName);
-    return collection.find((item: any) => item.id === id);
+    try {
+      const d = await getDoc(doc(db, collectionName, id));
+      if (!d.exists()) return null;
+      return { id: d.id, ...d.data() };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `${collectionName}/${id}`);
+      return null;
+    }
   },
 
-  add: async (collectionName: string, doc: any) => {
+  getById: async (collectionName: string, id: string) => {
+    return localDb.getOne(collectionName, id);
+  },
+
+  add: async (collectionName: string, data: any) => {
     try {
+      const id = data.id || uuidv4();
       const newDoc = {
-        ...doc,
-        id: uuidv4(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        ...data,
+        id,
+        createdAt: data.createdAt || serverTimestamp(),
+        updatedAt: serverTimestamp()
       };
-      
-      const res = await fetch(`${API_BASE}/${collectionName}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newDoc)
-      });
-      
-      return await safeJson(res);
+      await setDoc(doc(db, collectionName, id), newDoc);
+      return newDoc;
     } catch (err) {
-      console.error(`[localDb] add error for ${collectionName}:`, err);
+      handleFirestoreError(err, OperationType.WRITE, collectionName);
       return null;
     }
   },
 
   update: async (collectionName: string, id: string, updates: any) => {
     try {
-      const res = await fetch(`${API_BASE}/${collectionName}/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...updates,
-          updatedAt: new Date().toISOString()
-        })
-      });
-      
-      if (!res.ok) return null;
-      return await safeJson(res);
+      const docRef = doc(db, collectionName, id);
+      const updateData = {
+        ...updates,
+        updatedAt: serverTimestamp()
+      };
+      await updateDoc(docRef, updateData);
+      return { id, ...updateData };
     } catch (err) {
-      console.error(`[localDb] update error for ${collectionName}/${id}:`, err);
+      handleFirestoreError(err, OperationType.UPDATE, `${collectionName}/${id}`);
       return null;
     }
   },
 
   delete: async (collectionName: string, id: string) => {
     try {
-      await fetch(`${API_BASE}/${collectionName}/${id}`, {
-        method: 'DELETE'
-      });
+      await deleteDoc(doc(db, collectionName, id));
     } catch (err) {
-      console.error(`[localDb] delete error for ${collectionName}/${id}:`, err);
+      handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${id}`);
     }
   },
 
   query: async (collectionName: string, filterFn: (item: any) => boolean) => {
-    const collection = await localDb.getCollection(collectionName);
-    return collection.filter(filterFn);
+    const items = await localDb.getCollection(collectionName);
+    return items.filter(filterFn);
   }
 };
 
-// Auth replacement using server-side storage
 export const localAuth = {
-  getCurrentUserAsync: async () => {
+  getCurrentUserAsync: (): Promise<any> => {
+    return new Promise((resolve) => {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        unsubscribe();
+        if (user) {
+          resolve(user);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  },
+  
+  getCurrentUser: () => auth.currentUser,
+  
+  login: async () => {
+    const provider = new GoogleAuthProvider();
     try {
-      const res = await fetch('/api/auth/me');
-      if (!res.ok) return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
-      const text = await res.text();
-      return text ? JSON.parse(text) : { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
-    } catch (err) {
-      console.error(`[localAuth] getCurrentUserAsync error:`, err);
-      return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
+      const result = await signInWithPopup(auth, provider);
+      return result.user;
+    } catch (error) {
+      console.error("Login failed:", error);
+      throw error;
     }
   },
-  
-  // For synchronous access we might need a fallback or state management
-  // but since we are refactoring, we'll suggest components handle the async nature.
-  getCurrentUser: () => {
-    // Note: This is now a "stale" mock for parts of the app that expect sync access.
-    // Ideally, the app should use a Provider or async pattern.
-    return { uid: 'local-user', email: 'user@local.nexus', displayName: '本地用户' };
-  },
-  
+
   logout: async () => {
     try {
-      // Potentially clear server session if implemented
-      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+      await signOut(auth);
     } catch (err) {
       console.error("Logout failed:", err);
     }

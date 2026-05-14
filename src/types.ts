@@ -114,7 +114,7 @@ export interface KnowledgeEntry {
 export interface AgentSkill {
   id: string;
   name: string;
-  type: 'analysis' | 'generation' | 'strategy';
+  type: 'analysis' | 'generation' | 'strategy' | 'evolved';
   description: string;
   logic: string; // The prompt template or logic
   performanceScore: number;
@@ -156,6 +156,7 @@ export interface AgentInteraction {
   };
   timestamp: any;
   ownerId: string;
+  createdAt: any;
 }
 
 export interface LLMConfig {

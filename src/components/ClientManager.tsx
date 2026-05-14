@@ -87,6 +87,16 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     XLSX.writeFile(workbook, `Client_Assets_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  const [expandedActionIds, setExpandedActionIds] = useState<Set<string>>(new Set());
+
+  const toggleExpandAction = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const newSet = new Set(expandedActionIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setExpandedActionIds(newSet);
+  };
+
   const fetchData = async () => {
     try {
       const user = await localAuth.getCurrentUserAsync();
@@ -291,10 +301,12 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
     }
   };
 
-  const filteredClients = clients.filter(c => 
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    c.company.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredClients = clients
+    .filter(c => 
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      c.company.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => (b.projectScore || 0) - (a.projectScore || 0));
 
   const phases = Object.keys(PHASE_MATRIX) as ClientStage[];
 
@@ -377,65 +389,84 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
           </div>
         ) : viewMode === 'list' ? (
           <>
-            <div className="grid grid-cols-12 gap-4 px-10 py-5 border-b border-gray-100 bg-gray-50/50 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-              <div className="col-span-4">客户实体 / 决策者</div>
-              <div className="col-span-2 text-center">项目评分 / 等级</div>
+            <div className="grid grid-cols-12 gap-4 px-10 py-3 border-b border-gray-100 bg-gray-50/50 text-[9px] font-black uppercase tracking-widest text-gray-400">
+              <div className="col-span-3">项目实体 / 负责人</div>
+              <div className="col-span-1 text-center">Score</div>
               <div className="col-span-2">当前战略 Phase</div>
-              <div className="col-span-3">下一步行动</div>
+              <div className="col-span-5">下一步行动 (Fact-Based)</div>
               <div className="col-span-1"></div>
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-gray-50 no-scrollbar">
-              {filteredClients.map(client => (
-                <div 
-                  key={client.id}
-                  onClick={() => setSelectedClient(client)}
-                  className="grid grid-cols-12 gap-4 px-10 py-8 hover:bg-blue-50/25 cursor-pointer transition-all group items-center"
-                >
-                  <div className="col-span-4 flex items-center gap-6">
-                    <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all font-black">
-                      {client.company.charAt(0)}
+              {filteredClients.map(client => {
+                const isExpanded = expandedActionIds.has(client.id);
+                return (
+                  <div 
+                    key={client.id}
+                    onClick={() => setSelectedClient(client)}
+                    className="grid grid-cols-12 gap-4 px-10 py-3 hover:bg-blue-50/20 cursor-pointer transition-all group items-start"
+                  >
+                    <div className="col-span-3 flex items-center gap-4">
+                      <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all font-black text-xs">
+                        {client.company.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-sm text-gray-900 leading-tight group-hover:text-blue-600 transition-colors truncate">{client.company}</div>
+                        <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest truncate">{client.name}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="font-bold text-base text-gray-900 leading-none mb-1">{client.company}</div>
-                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{client.name}</div>
-                    </div>
-                  </div>
-                  <div className="col-span-2 text-center">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className={`text-sm font-black ${(client.projectScore || 0) >= 75 ? 'text-emerald-500' : (client.projectScore || 0) >= 55 ? 'text-blue-500' : (client.projectScore || 0) >= 35 ? 'text-amber-500' : 'text-red-500'}`}>
+                    <div className="col-span-1 text-center self-center">
+                      <span className={`text-xs font-black ${(client.projectScore || 0) >= 75 ? 'text-emerald-500' : (client.projectScore || 0) >= 55 ? 'text-blue-500' : (client.projectScore || 0) >= 35 ? 'text-amber-500' : 'text-red-500'}`}>
                         {client.projectScore || 0}
                       </span>
-                      <span className="text-[8px] font-bold text-gray-400">{(client.projectScore || 0) >= 75 ? 'A级' : (client.projectScore || 0) >= 55 ? 'B级' : (client.projectScore || 0) >= 35 ? 'C级' : 'D级'}</span>
+                    </div>
+                    <div className="col-span-2 self-center">
+                      <span className="text-[9px] font-bold bg-blue-50/50 text-blue-600 px-2 py-1 rounded border border-blue-100/50">
+                        {PHASE_MATRIX[client.stage as keyof typeof PHASE_MATRIX]?.label || '未知阶段'}
+                      </span>
+                    </div>
+                    <div className="col-span-5 self-center">
+                      {client.nextActionSuggestion && (
+                        <div className="flex flex-col gap-1">
+                          <div 
+                             onClick={(e) => toggleExpandAction(e, client.id)}
+                             className="flex items-start gap-2 group/text cursor-pointer"
+                          >
+                             <div className={`flex items-start gap-1.5 flex-1 transition-opacity ${client.nextActionCompleted ? 'opacity-30' : 'opacity-100'}`}>
+                                <Sparkles className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                                <span className={`text-[11px] font-medium transition-colors group-hover/text:text-blue-600 ${isExpanded ? '' : 'line-clamp-1'} ${client.nextActionCompleted ? 'line-through' : 'text-gray-600'}`}>
+                                   {client.nextActionSuggestion}
+                                </span>
+                             </div>
+                             <ChevronRight className={`w-3 h-3 mt-1 text-gray-300 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                          </div>
+                          
+                          {isExpanded && (
+                             <div className="flex items-center gap-3 pl-4.5">
+                                <div className="flex items-center gap-1 text-[9px] font-black text-blue-500/60 uppercase">
+                                   <Clock className="w-2.5 h-2.5" />
+                                   截止: {client.nextActionDate?.toDate ? 
+                                       client.nextActionDate.toDate().toISOString().split('T')[0] : 
+                                       (client.nextActionDate ? new Date(client.nextActionDate).toISOString().split('T')[0] : '待定')}
+                                </div>
+                                <button 
+                                  onClick={(e) => handleToggleAction(e, client)}
+                                  className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                                    client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
+                                  }`}
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                </button>
+                             </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="col-span-1 text-right self-center">
+                      <ChevronRight className="w-4 h-4 text-gray-200 group-hover:text-blue-600 transition-colors inline-block" />
                     </div>
                   </div>
-                  <div className="col-span-2">
-                    <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-100">
-                      {PHASE_MATRIX[client.stage as keyof typeof PHASE_MATRIX]?.label || '未知阶段'}
-                    </span>
-                  </div>
-                  <div className="col-span-3">
-                    {client.nextActionSuggestion && (
-                      <div className="flex items-center justify-between gap-4">
-                        <div className={`flex items-start gap-2 flex-1 transition-opacity ${client.nextActionCompleted ? 'opacity-30' : 'opacity-100'}`}>
-                          <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                          <span className={`text-xs font-medium line-clamp-1 ${client.nextActionCompleted ? 'line-through' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
-                        </div>
-                        <button 
-                          onClick={(e) => handleToggleAction(e, client)}
-                          className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
-                            client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="col-span-1 text-right">
-                    <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-blue-600 transition-colors inline-block" />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         ) : (
@@ -460,12 +491,14 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
                     </div>
                   </div>
                   
-                  <div className="flex-1 bg-gray-50/30 border-x border-b border-gray-100 rounded-b-[2rem] p-4 space-y-4 overflow-y-auto no-scrollbar">
-                    {phaseClients.map(client => (
-                      <div 
-                        key={client.id}
-                        className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative cursor-pointer"
-                      >
+                        <div className="flex-1 bg-gray-50/30 border-x border-b border-gray-100 rounded-b-[2rem] p-3 space-y-3 overflow-y-auto no-scrollbar">
+                      {phaseClients
+                        .sort((a, b) => (b.projectScore || 0) - (a.projectScore || 0))
+                        .map(client => (
+                        <div 
+                          key={client.id}
+                          className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-xl transition-all group relative cursor-pointer"
+                        >
                         <div className="flex items-start justify-between mb-4">
                            <div onClick={() => setSelectedClient(client)} className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
@@ -489,30 +522,50 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
                         </div>
 
                         {client.nextActionSuggestion && (
-                          <div className={`mt-4 pt-4 border-t border-gray-50 space-y-3 transition-opacity ${client.nextActionCompleted ? 'opacity-40' : 'opacity-100'}`}>
-                             <div className="flex items-start gap-2.5">
-                                <BrainCircuit className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                                <span className={`text-[10px] leading-relaxed font-medium line-clamp-3 ${client.nextActionCompleted ? 'line-through text-gray-400' : 'text-gray-600'}`}>{client.nextActionSuggestion}</span>
+                          <div className={`mt-3 pt-3 border-t border-gray-50 space-y-2 transition-opacity ${client.nextActionCompleted ? 'opacity-40' : 'opacity-100'}`}>
+                             <div 
+                                onClick={(e) => toggleExpandAction(e, client.id)}
+                                className="flex items-start gap-2.5 cursor-pointer group/action"
+                             >
+                                <BrainCircuit className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                                <span className={`text-[10px] leading-relaxed font-medium group-hover/action:text-blue-600 ${expandedActionIds.has(client.id) ? '' : 'line-clamp-1'} ${client.nextActionCompleted ? 'line-through text-gray-400' : 'text-gray-600'}`}>
+                                  {client.nextActionSuggestion}
+                                </span>
                              </div>
-                             <div className="flex items-center justify-between">
-                                <div className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest w-fit px-2 py-1 rounded-md ${
-                                  client.nextActionCompleted ? 'bg-gray-100 text-gray-400' : 'text-emerald-600 bg-emerald-50'
-                                }`}>
-                                   <Clock className="w-2.5 h-2.5" />
-                                   {client.nextActionDate?.toDate ? 
-                                     client.nextActionDate.toDate().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) : 
-                                     '待定日程'
-                                   }
+                             
+                             {(expandedActionIds.has(client.id) || client.nextActionCompleted) && (
+                                <div className="flex items-center justify-between">
+                                   <div className={`flex items-center gap-1.5 text-[8px] font-black uppercase tracking-widest w-fit px-1.5 py-0.5 rounded cursor-pointer ${
+                                     client.nextActionCompleted ? 'bg-gray-100 text-gray-400' : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                                   } relative`}>
+                                      <Clock className="w-2 h-2" />
+                                      <input 
+                                         type="date"
+                                         value={client.nextActionDate?.toDate ? 
+                                           client.nextActionDate.toDate().toISOString().split('T')[0] : 
+                                           (client.nextActionDate ? new Date(client.nextActionDate).toISOString().split('T')[0] : '')
+                                         }
+                                         onChange={async (e) => {
+                                           const newDate = new Date(e.target.value);
+                                           if (!isNaN(newDate.getTime())) {
+                                             await localDb.update('clients', client.id, { nextActionDate: newDate });
+                                             await fetchData();
+                                           }
+                                         }}
+                                         onClick={e => e.stopPropagation()}
+                                         className="bg-transparent border-none p-0 focus:ring-0 cursor-pointer outline-none w-[75px] text-[8px] font-black uppercase"
+                                      />
+                                   </div>
+                                   <button 
+                                     onClick={(e) => handleToggleAction(e, client)}
+                                     className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${
+                                       client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
+                                     }`}
+                                   >
+                                     <CheckCircle2 className="w-3.5 h-3.5" />
+                                   </button>
                                 </div>
-                                <button 
-                                  onClick={(e) => handleToggleAction(e, client)}
-                                  className={`w-7 h-7 rounded-full border flex items-center justify-center transition-all ${
-                                    client.nextActionCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-200 text-gray-300 hover:border-emerald-500 hover:text-emerald-500'
-                                  }`}
-                                >
-                                  <CheckCircle2 className="w-4 h-4" />
-                                </button>
-                             </div>
+                             )}
                           </div>
                         )}
                         

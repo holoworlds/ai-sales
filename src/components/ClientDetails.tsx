@@ -89,8 +89,24 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   // Consult State
   const [consultationText, setConsultationText] = useState('');
   const [consulting, setConsulting] = useState(false);
-  const [consultHistory, setConsultHistory] = useState<{ role: 'user' | 'ai', content: string }[]>([]);
+  const [consultHistory, setConsultHistory] = useState<{ role: 'user' | 'ai', content: string, timestamp?: any }[]>([]);
 
+  // Add a way to refresh client data in parent
+  const [localClient, setLocalClient] = useState<Client>(client);
+  const currentPhaseInfo = PHASE_MATRIX[localClient.stage as ClientStage];
+
+  useEffect(() => {
+    setLocalClient(client);
+  }, [client]);
+
+  const refreshLocalClient = async () => {
+    try {
+      const updated = await localDb.getById('clients', client.id);
+      if (updated) setLocalClient(updated as Client);
+    } catch (err) {
+      console.error("Refresh local client failed:", err);
+    }
+  };
   // Edit Profile State
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Client>>({});
@@ -145,6 +161,13 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   // Filter state for assets
   const [assetFilter, setAssetFilter] = useState<'all' | 'PPT' | 'Report' | 'Strategy' | 'Prompt' | 'Journey' | 'Briefing'>('all');
 
+  const getTimestamp = (ts: any) => {
+    if (!ts) return 0;
+    if (ts.toDate) return ts.toDate().getTime();
+    if (ts.seconds) return ts.seconds * 1000;
+    return new Date(ts).getTime();
+  };
+
   const fetchData = useCallback(async () => {
     try {
       const user = await localAuth.getCurrentUserAsync();
@@ -153,21 +176,16 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
       // Check if client is still valid
       if (!client?.id) return;
 
-      const iData = await localDb.getAll(`clients/${client.id}/interactions` as any);
-      // Sort oldest to newest for chat flow
-      iData.sort((a: any, b: any) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeA - timeB;
-      });
+      const cHistory = await localDb.getAll(`clients/${client.id}/consultations` as any);
+      cHistory.sort((a: any, b: any) => getTimestamp(a.timestamp) - getTimestamp(b.timestamp));
+      setConsultHistory(cHistory as any);
+
+      const iData = await localDb.getAll(`clients/${client.id}/interactions` as any);      // Sort oldest to newest for chat flow
+      iData.sort((a: any, b: any) => getTimestamp(a.timestamp) - getTimestamp(b.timestamp));
       setInteractions(iData);
 
       const cData = await localDb.getAll(`clients/${client.id}/content` as any);
-      cData.sort((a: any, b: any) => {
-        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return timeB - timeA;
-      });
+      cData.sort((a: any, b: any) => getTimestamp(b.createdAt) - getTimestamp(a.createdAt));
       setContentAssets(cData);
     } catch (error) {
       console.error("[ClientDetails] fetchData error:", error);
@@ -485,33 +503,50 @@ ${result.winningStrategy}
     if (!consultationText.trim()) return;
     const userMsg = consultationText;
     setConsultationText('');
-    setConsultHistory(prev => [...prev, { role: 'user', content: userMsg }]);
-    setConsulting(true);
-    setError(null);
-
+    const timestamp = new Date().toISOString();
+    
     try {
+      const user = await localAuth.getCurrentUser();
+      
+      // Save User Message
+      await localDb.add(`clients/${client.id}/consultations` as any, {
+        role: 'user',
+        content: userMsg,
+        timestamp: new Date().toISOString(),
+        ownerId: user?.uid
+      });
+
+      setConsulting(true);
+      setError(null);
+      
+      await fetchData(); // Refresh history immediately after saving user msg
+
       const context = `
-        Client: ${client.company}
-        Summary: ${client.memorySummary}
+        Client: ${localClient.company}
+        Summary: ${localClient.memorySummary}
         Interactions: ${interactions.map(i => i.content).join('\n')}
       `;
       const rawResult = await consultClientStrategy(userMsg, context);
       const result = JSON.parse(JSON.stringify(rawResult));
-      setConsultHistory(prev => [...prev, { 
-        role: 'ai', 
-        content: String(result?.reply || result?.content || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。'))
-      }]);
+      const aiReply = String(result?.reply || result?.content || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。'));
+      
+      await localDb.add(`clients/${client.id}/consultations` as any, {
+        role: 'ai',
+        content: aiReply,
+        timestamp: new Date().toISOString()
+      });
 
       if (result.suggestedUpdates) {
-        // AI suggests updating client profile based on discussion
         const updates: any = { updatedAt: new Date().toISOString() };
         if (result.suggestedUpdates.memorySummary) updates.memorySummary = result.suggestedUpdates.memorySummary;
         if (result.suggestedUpdates.stage) updates.stage = result.suggestedUpdates.stage;
         if (result.suggestedUpdates.nextActionSuggestion) updates.nextActionSuggestion = result.suggestedUpdates.nextActionSuggestion;
         
         await localDb.update('clients', client.id, updates);
-        await fetchData();
+        await refreshLocalClient();
       }
+      
+      await fetchData(); // Refresh history again after AI reply
     } catch (err: any) {
       console.error(err);
       setError(err.message || '对话研讨暂时中断，请重试');
@@ -575,14 +610,12 @@ ${result.winningStrategy}
         scoreDetails: newScoreDetails,
         projectScore: totalScore
       });
-      fetchData();
+      refreshLocalClient();
     } catch (error) {
       console.error(error);
       setError("更新细分项评分失败");
     }
   };
-
-  const currentPhaseInfo = PHASE_MATRIX[client.stage];
 
   return (
     <div className="flex flex-col min-h-full bg-[#F5F7FA] -m-8 lg:-m-10 pb-32">
@@ -595,25 +628,25 @@ ${result.winningStrategy}
             </button>
             <div>
               <div className="flex items-center gap-4 mb-2">
-                <h1 className="text-3xl font-bold tracking-tight text-[#1A1C1E]">{client.company}</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-[#1A1C1E]">{localClient.company}</h1>
                 <span className="text-[10px] font-bold uppercase tracking-widest px-3 py-1 bg-blue-600 text-white rounded-full border border-blue-600">
-                  {currentPhaseInfo?.label || client.stage}
+                  {PHASE_MATRIX[localClient.stage as keyof typeof PHASE_MATRIX]?.label || localClient.stage}
                 </span>
                 <div className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-100">
                    <Target className="w-3 h-3" />
-                   <span className="text-[10px] font-black uppercase tracking-tighter">得: {client.projectScore || 0}</span>
+                   <span className="text-[10px] font-black uppercase tracking-tighter">得: {localClient.projectScore || 0}</span>
                 </div>
               </div>
               <div className="flex items-center gap-6">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                  推动人: {client.name} <span className="text-gray-200">•</span> 会话 ID: {client.id.slice(0, 8)}
+                  推动人: {localClient.name} <span className="text-gray-200">•</span> 会话 ID: {localClient.id.slice(0, 8)}
                 </p>
                 
                 {/* Repositioned Buttons */}
                 <div className="flex gap-2">
                   <button 
                     onClick={() => {
-                      setEditForm({ ...client });
+                      setEditForm({ ...localClient });
                       setIsEditing(true);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg transition-all group"
@@ -623,7 +656,10 @@ ${result.winningStrategy}
                   </button>
 
                   <button 
-                    onClick={handleAnalyze}
+                    onClick={async () => {
+                      await handleAnalyze();
+                      await refreshLocalClient();
+                    }}
                     disabled={analyzing}
                     className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg transition-all disabled:opacity-50 group"
                   >
@@ -637,7 +673,7 @@ ${result.winningStrategy}
         </div>
         
         {/* Top Right Next Action Panel */}
-        {client.nextActionSuggestion && (
+        {localClient.nextActionSuggestion && (
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -653,28 +689,54 @@ ${result.winningStrategy}
                       <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">下一步行动建议 (Fact-Based)</span>
                    </div>
                 </div>
-                <button 
-                  onClick={async () => {
-                    const newState = !localNextActionCompleted;
-                    setLocalNextActionCompleted(newState); // Immediate feedback
-                    try {
-                      await localDb.update('clients', client.id, {
-                        nextActionCompleted: newState,
-                      });
-                      await fetchData();
-                    } catch (err) { 
-                      console.error(err);
-                      setLocalNextActionCompleted(!newState); // Revert on failure
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg ${
-                    localNextActionCompleted 
-                      ? 'bg-emerald-500 text-white shadow-emerald-500/20' 
-                      : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/20'
-                  }`}
-                >
-                  {localNextActionCompleted ? '已执行 (点击撤销)' : '确认已执行'}
-                </button>
+                <div className="flex items-center gap-2">
+                   <button 
+                     onClick={async () => {
+                       if (confirm('确定要拒绝此建议吗？系统会记录此反馈并尝试优化未来的建议。')) {
+                         try {
+                           await localDb.add(`clients/${localClient.id}/interactions`, {
+                             type: 'Update',
+                             content: `用户拒绝了AI建议: "${localClient.nextActionSuggestion}"。理由: 用户认为该建议不合理。`,
+                             timestamp: new Date(),
+                             author: 'System'
+                           });
+                           await localDb.update('clients', localClient.id, {
+                             nextActionSuggestion: null,
+                             nextActionDate: null
+                           });
+                           await refreshLocalClient();
+                         } catch (err) {
+                           console.error("Reject suggestion failed:", err);
+                         }
+                       }
+                     }}
+                     className="px-2.5 py-1 bg-red-900/10 text-red-500/40 hover:text-red-500 border border-red-900/5 hover:border-red-900/20 rounded-lg text-[8px] font-black uppercase transition-all"
+                   >
+                     不接受
+                   </button>
+                   <button 
+                     onClick={async () => {
+                       const newState = !localNextActionCompleted;
+                       setLocalNextActionCompleted(newState); // Immediate feedback
+                       try {
+                         await localDb.update('clients', localClient.id, {
+                           nextActionCompleted: newState,
+                         });
+                         await refreshLocalClient();
+                       } catch (err) { 
+                         console.error(err);
+                         setLocalNextActionCompleted(!newState); // Revert on failure
+                       }
+                     }}
+                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg ${
+                       localNextActionCompleted 
+                         ? 'bg-emerald-500 text-white shadow-emerald-500/20' 
+                         : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/20'
+                     }`}
+                   >
+                     {localNextActionCompleted ? '已执行 (点击撤销)' : '确认已执行'}
+                   </button>
+                </div>
                 {error && (
                   <div className="absolute top-full mt-2 right-0 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg text-[8px] text-red-500">
                     {error}
@@ -682,12 +744,29 @@ ${result.winningStrategy}
                 )}
              </div>
              <div className={`text-sm font-bold leading-relaxed pr-4 ${localNextActionCompleted ? 'text-white/30 line-through' : 'text-white/90'}`}>
-                {client.nextActionSuggestion}
+                {localClient.nextActionSuggestion}
              </div>
              <div className="mt-4 flex items-center justify-between pt-4 border-t border-white/5 pr-4">
-                <div className="flex items-center gap-2 text-[9px] font-bold text-white/40 uppercase tracking-widest">
+                <div className="flex items-center gap-2 text-[9px] font-bold text-white/40 uppercase tracking-widest group/date">
                    <Clock className="w-3 h-3 text-blue-400" />
-                   截止日期: {safeDateFormat(client.nextActionDate)}
+                   截止日期: 
+                   <input 
+                     type="date" 
+                     value={safeDateFormat(localClient.nextActionDate)}
+                     onChange={async (e) => {
+                       const newDate = new Date(e.target.value);
+                       if (isNaN(newDate.getTime())) return;
+                       try {
+                         await localDb.update('clients', localClient.id, {
+                           nextActionDate: newDate,
+                         });
+                         await refreshLocalClient();
+                       } catch (err) {
+                         console.error("Update date failed:", err);
+                       }
+                     }}
+                     className="bg-transparent border-none text-white/60 focus:text-white outline-none cursor-pointer [color-scheme:dark]"
+                   />
                 </div>
                 <div className="flex items-center gap-1.5">
                    <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" />

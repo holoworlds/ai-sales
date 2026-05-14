@@ -5,7 +5,7 @@ import { LLMProvider, LLMConfig } from "../types";
 
 const getActiveConfig = async (): Promise<LLMConfig | null> => {
   try {
-    const configs = await localDb.getAll('llmConfigs');
+    const configs = await localDb.getAll('llm_configs');
     const found = configs.find((c: LLMConfig) => c.isPrimary && c.status === 'Active') || configs[0];
     
     if (found) return found;

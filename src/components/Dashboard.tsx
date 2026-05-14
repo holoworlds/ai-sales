@@ -46,7 +46,7 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
         const skillsData = await localDb.getAll('skills');
         setSkillCount(skillsData.length);
 
-        const proposalsData = (await localDb.getAll('proposals')).filter((p: any) => p.status === 'pending');
+        const proposalsData = (await localDb.getAll('evolution_proposals')).filter((p: any) => p.status === 'pending');
         setProposalCount(proposalsData.length);
       } catch (error) {
         console.error("Dashboard data fetch failed:", error);
@@ -77,6 +77,33 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
     { title: '更新知识库', desc: '同步最新的行业文档以供 AI 深度学习', view: 'knowledge' },
     { title: '生成营销资产', desc: '快速创建 PPT、报告以及 AI 提示词', view: 'clients' },
   ];
+
+  // 计算当前周的所有日期 (周一至周日)
+  const [weekOffset, setWeekOffset] = useState(0);
+  const today = new Date();
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    // 增加偏移量来支持切换周
+    d.setDate(d.getDate() + weekOffset * 7);
+    const day = d.getDay();
+    // 调整为周一作为一周的开始
+    const diff = d.getDate() - (day === 0 ? 6 : day - 1) + i;
+    return new Date(d.setDate(diff));
+  });
+
+  const getActionsForDate = (date: Date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return clients.filter(c => {
+      if (!c.nextActionSuggestion || c.nextActionCompleted || !c.nextActionDate) return false;
+      let actionDate;
+      if (typeof (c.nextActionDate as any).toDate === 'function') {
+        actionDate = (c.nextActionDate as any).toDate();
+      } else {
+        actionDate = new Date(c.nextActionDate as any);
+      }
+      return actionDate.toISOString().split('T')[0] === dateStr;
+    });
+  };
 
   return (
     <div className="space-y-10">
@@ -199,39 +226,86 @@ export default function Dashboard({ setCurrentView, setSelectedClientId }: Dashb
           </div>
         </section>
 
-        {/* Pending Actions */}
+        {/* Pending Actions Weekly Calendar */}
         <section className="space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400">待执行战略行动</h2>
-            <button onClick={() => setCurrentView('clients')} className="text-[10px] font-bold text-blue-600 hover:underline">查看全部</button>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-3xl p-6 shadow-sm space-y-6 overflow-hidden">
-            {clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).slice(0, 5).map((client) => (
-              <div 
-                key={client.id} 
-                onClick={() => {
-                  setSelectedClientId(client.id);
-                  setCurrentView('clients');
-                }}
-                className="flex gap-4 items-start group cursor-pointer border-b border-gray-50 last:border-0 pb-6 last:pb-0"
+            <h2 className="text-sm font-bold uppercase tracking-widest text-gray-400">战略执行周历</h2>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setWeekOffset(prev => prev - 1)}
+                className="p-1 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors"
+                title="上一周"
               >
-                <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                  <div className="text-[10px] font-black">{client.company.charAt(0)}</div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-bold text-gray-900 group-hover:text-blue-600 transition-colors leading-tight truncate">{client.company}</div>
-                  <div className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed opacity-70">{client.nextActionSuggestion}</div>
-                  <div className="flex items-center gap-2 mt-3 text-[9px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 w-fit px-2 py-0.5 rounded">
-                    <Clock className="w-2.5 h-2.5" />
-                    建议执行: {client.nextActionDate ? (client.nextActionDate.toDate ? client.nextActionDate.toDate().toISOString().split('T')[0] : new Date(client.nextActionDate).toISOString().split('T')[0]) : '待定'}
+                <ChevronRight className="w-4 h-4 rotate-180" />
+              </button>
+              <button 
+                onClick={() => setWeekOffset(0)}
+                className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-colors ${weekOffset === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}
+              >
+                Today
+              </button>
+              <button 
+                onClick={() => setWeekOffset(prev => prev + 1)}
+                className="p-1 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors"
+                title="下一周"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-[2.5rem] p-6 shadow-sm flex flex-col">
+            {weekDates.map((date, index) => {
+              const actions = getActionsForDate(date);
+              const isToday = today.toISOString().split('T')[0] === date.toISOString().split('T')[0];
+              const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+              
+              return (
+                <div 
+                  key={index} 
+                  className={`flex items-start gap-4 py-4 border-b border-gray-50 last:border-0 ${isToday ? 'bg-blue-50/30 -mx-3 px-3 rounded-2xl border-none my-1' : ''}`}
+                >
+                  <div className="flex flex-col items-center min-w-[36px] pt-1">
+                    <span className={`text-[9px] font-black uppercase tracking-tighter ${isToday ? 'text-blue-600' : 'text-gray-300'}`}>
+                      {dayNames[date.getDay()]}
+                    </span>
+                    <span className={`text-base font-bold leading-none mt-1 ${isToday ? 'text-blue-700' : 'text-gray-900'}`}>
+                      {date.getDate()}
+                    </span>
                   </div>
+                  
+                  <div className="flex-1 flex flex-wrap gap-2 pt-1.5">
+                    {actions.length > 0 ? (
+                      actions.map(action => (
+                        <motion.div 
+                          key={action.id}
+                          whileHover={{ scale: 1.02 }}
+                          onClick={() => {
+                            setSelectedClientId(action.id);
+                            setCurrentView('clients');
+                          }}
+                          className="px-3 py-1.5 bg-white border border-gray-100 rounded-xl text-[10px] font-bold text-gray-700 hover:border-blue-500 hover:text-blue-600 transition-all cursor-pointer shadow-sm shadow-black/5 truncate max-w-full"
+                        >
+                          {action.company}
+                        </motion.div>
+                      ))
+                    ) : (
+                      <div className="h-6 w-full max-w-[80px] bg-gray-50/50 rounded-xl border border-dashed border-gray-100" />
+                    )}
+                  </div>
+
+                  {isToday && (
+                    <div className="mt-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
+
             {clients.filter(c => c.nextActionSuggestion && !c.nextActionCompleted).length === 0 && (
               <div className="py-20 text-center flex flex-col items-center gap-4 opacity-30">
                 <CheckCircle2 className="w-12 h-12 text-blue-500" />
-                <p className="text-[10px] font-bold uppercase tracking-widest">所有建议行动已完成</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest">无待办执行项</p>
               </div>
             )}
           </div>

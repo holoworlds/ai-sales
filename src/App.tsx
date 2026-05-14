@@ -156,7 +156,7 @@ export default function App() {
   const loginLocal = async () => {
     setLoading(true);
     try {
-      const u = await localAuth.getCurrentUserAsync();
+      const u = await localAuth.login();
       setUser(u);
     } catch (error) {
       console.error("Login failed:", error);

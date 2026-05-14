@@ -81,19 +81,25 @@ service cloud.firestore {
 
     function isValidSkill(data) {
       return data.name is string && data.name.size() <= 100 &&
-             data.type in ['analysis', 'generation', 'strategy'] &&
+             data.type in ['analysis', 'generation', 'strategy', 'evolved'] &&
              data.logic is string &&
              data.ownerId == request.auth.uid;
     }
 
     function isValidAgentLog(data) {
       return data.query is string &&
-             data.response is map &&
+             data.result is map &&
              data.ownerId == request.auth.uid;
     }
 
+    function isValidErrorLog(data) {
+      return data.message is string &&
+             (data.get('stack', '') is string) &&
+             (data.get('timestamp', '') is string);
+    }
+
     function isValidEvolutionProposal(data) {
-      return data.problem is string &&
+      return (data.get('problem', '') is string) &&
              data.status in ['pending', 'approved', 'rejected', 'implemented'] &&
              data.ownerId == request.auth.uid;
     }
@@ -111,19 +117,26 @@ service cloud.firestore {
 
     match /skills/{skillId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidSkill(incoming()) && incoming().createdAt == request.time;
+      allow create: if isSignedIn() && isValidSkill(incoming()) && (incoming().createdAt is timestamp || incoming().createdAt == request.time);
       allow update: if isOwner(existing().ownerId) && isValidSkill(incoming());
       allow delete: if isOwner(existing().ownerId);
     }
 
     match /agent_logs/{logId} {
       allow read: if isOwner(existing().ownerId);
-      allow create: if isSignedIn() && isValidAgentLog(incoming()) && incoming().timestamp == request.time;
+      allow create: if isSignedIn() && isValidAgentLog(incoming()) && (incoming().createdAt is timestamp || incoming().createdAt == request.time);
+      allow delete: if isOwner(existing().ownerId);
+    }
+
+    match /errorLogs/{logId} {
+      allow create: if true; // Allow anonymous error logging
+      allow read: if isSignedIn(); // Or isAdmin if exists
+      allow delete: if isSignedIn();
     }
 
     match /evolution_proposals/{proposalId} {
       allow read: if isOwner(existing().ownerId);
-      allow create: if isSignedIn() && isValidEvolutionProposal(incoming()) && incoming().createdAt == request.time;
+      allow create: if isSignedIn() && isValidEvolutionProposal(incoming()) && (incoming().createdAt is timestamp || incoming().createdAt == request.time);
       allow update: if isOwner(existing().ownerId) && isValidEvolutionProposal(incoming());
     }
 

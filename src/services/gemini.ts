@@ -352,8 +352,32 @@ export const evolveAgentCapability = async (proposal: any, existingSkills: any) 
 
 export const evaluateEvolutionProposal = async (userInput: any) => {
   try {
-    const prompt = `评估改进提案：${JSON.stringify(userInput)}
-    返回 JSON: { "isAccepted": true, "evaluation": "评价", "refinedProposal": {}, "tags": [] }`;
+    const prompt = `
+      你是一个资深的 AI 系统架构师。请评估以下用户手动注入或系统生成的“能力进化提案”。
+      
+      【提案内容】：
+      ${JSON.stringify(userInput)}
+      
+      【评估任务】：
+      1. 判断该提案是否具有战略价值，是否逻辑自洽。
+      2. 如果接受 (isAccepted: true)，请对提案进行“补全”和“精炼”。
+      3. 补全后的内容应包含：能力名称、详细描述、核心逻辑（Prompt 以后缀形式存在）。
+      
+      请严格返回如下 JSON 格式：
+      {
+        "isAccepted": true/false,
+        "evaluation": "你对该提案的专业评价（100字左右），说明其优缺点及补全理由。",
+        "refinedProposal": {
+          "suggestedSkillName": "精炼后的能力名称（如：复杂局面抗拒点拆解）",
+          "suggestedSkillDescription": "该能力的详细定义与应用场景",
+          "suggestedSkillLogic": "该能力内置的推理逻辑或 Prompt 模版",
+          "problem": "该能力旨在解决的具体瓶颈",
+          "missingCapability": "系统当前缺失的关键认知点",
+          "rootCause": "导致该痛点的深层原因"
+        },
+        "tags": ["标签1", "标签2"]
+      }
+    `;
 
     const response = await callLLM(prompt, { json: true });
     return typeof response === 'string' ? safeJsonParse(response) : response;
