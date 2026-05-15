@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { localDb, localAuth } from '../services/storage';
 import { Client } from '../types';
 import { motion } from 'motion/react';
-import StrategicAdvisor from './StrategicAdvisor';
 import { 
   Users, 
   TrendingUp, 

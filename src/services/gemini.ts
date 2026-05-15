@@ -73,9 +73,30 @@ const safeJsonParse = (text: string) => {
   }
 };
 
+/**
+ * 核心认知检索：获取所有已演进的战略技能，作为 AI 的全局“大脑插件”。
+ * 实现了“认知沉淀”对底层逻辑的影响。
+ */
+const getEvolutionContext = async () => {
+  try {
+    const skills = await localDb.getAll('skills');
+    if (!skills || skills.length === 0) return "";
+    
+    return `
+【系统已沉淀的认知演进/核心技能】：
+${skills.map((s: any) => `- [${s.name}]: ${s.description || s.logic}`).join('\n')}
+请在本次分析中，优先应用上述沉淀的认知逻辑。
+`;
+  } catch (err) {
+    return "";
+  }
+};
+
 export const analyzeClientStage = async (interactions: string) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       你是一个资深的B2B大客户销售专家和战略顾问。请根据提供的客户互动历史和项目情报（Briefings），深度审计该客户的项目状态。
       
       【阶段矩阵定义】：
@@ -231,8 +252,9 @@ export const queryKnowledgeBase = async (query: string, context: string) => {
 
 export const extractKnowledgeInsights = async (content: string) => {
   try {
-    const prompt = `请分析并提炼以下内容的核心洞察。
-    返回 JSON: { "suggestedTitle": "标题", "summary": "摘要", "tags": ["标签"], "category": "分类" }
+    const prompt = `你是一个资深的 AI 营销专家。请分析以下内容并提炼核心洞察。
+    特别注意：自动生成与“AI 营销”、“数字化转型”、“内容分发”相关的语义标签。
+    返回 JSON: { "suggestedTitle": "标题", "summary": "摘要", "tags": ["标签1", "标签2"], "category": "分类" }
     内容: ${content}`;
 
     const response = await callLLM(prompt, { json: true });
@@ -245,7 +267,9 @@ export const extractKnowledgeInsights = async (content: string) => {
 
 export const performStrategicAgentReasoning = async (queryText: string, context: any) => {
   try {
-    const prompt = `你是一个复合型 Agent 系统。指令：${queryText}。上下文：${JSON.stringify(context)}
+    const evoContext = await getEvolutionContext();
+    const prompt = `${evoContext}
+    你是一个复合型 Agent 系统。指令：${queryText}。上下文：${JSON.stringify(context)}
     返回 JSON：{ "analysis": "分析", "decision": "决策", "recommendedAction": "建议", "generatedMessage": "消息", "usedSkills": [], "confidence": 0.9, "suggestedSystemAction": { "type": "UPDATE_CLIENT", "data": {}, "reasoning": "理由" } }`;
 
     const response = await callLLM(prompt, { json: true });
@@ -263,7 +287,9 @@ export const performStrategicAgentReasoning = async (queryText: string, context:
 
 export const generateStrategicPrompt = async (requirements: string, context?: any) => {
   try {
-    const prompt = `你是一个资深的 Prompt 工程师。请根据以下需求和提供的参考资料上下文，编写一个可以最大化激发大模型（如 GPT-4 或 Gemini）能力的专业 Prompt。
+    const evoContext = await getEvolutionContext();
+    const prompt = `${evoContext}
+    你是一个资深的 Prompt 工程师。请根据以下需求和提供的参考资料上下文，编写一个可以最大化激发大模型（如 GPT-4 或 Gemini）能力的专业 Prompt。
     
     返回 JSON 结构：
     {
@@ -283,7 +309,9 @@ export const generateStrategicPrompt = async (requirements: string, context?: an
 
 export const generateClientJourney = async (clientInfo: any, interactions?: any, knowledge?: any) => {
   try {
-    const prompt = `分析该客户并生成客户旅程图（B2B）：
+    const evoContext = await getEvolutionContext();
+    const prompt = `${evoContext}
+    分析该客户并生成客户旅程图（B2B）：
     客户：${JSON.stringify(clientInfo)}
     互动：${JSON.stringify(interactions)}
     知识：${JSON.stringify(knowledge)}`;
@@ -297,7 +325,9 @@ export const generateClientJourney = async (clientInfo: any, interactions?: any,
 
 export const generateMeetingIntelligence = async (interactions: any, clientContext?: any) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       你是一个资深的项目分析专家。请从提供的互动历史中提取深度结构化的“会议情报”与“项目进展”。
       
       【提取要求】：

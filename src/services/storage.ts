@@ -1,87 +1,25 @@
 
 import { v4 as uuidv4 } from 'uuid';
-import { initializeApp, getApps } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  getDoc, 
-  doc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where,
-  getDocFromServer,
-  serverTimestamp
-} from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-// Test Connection as per critical directive
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    }
-  }
-}
-testConnection();
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
+// This file now acts as a proxy for the server-side JSON storage in /data
 export const localDb = {
-  getCollection: async (collectionName: string): Promise<any[]> => {
+  getAll: async (collectionName: string): Promise<any[]> => {
     try {
-      const snap = await getDocs(collection(db, collectionName));
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const res = await fetch(`/api/db/${collectionName}`);
+      if (!res.ok) throw new Error(`Fetch failed: ${res.statusText}`);
+      return await res.json();
     } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, collectionName);
+      console.error(`Error getting all from ${collectionName}:`, err);
       return [];
     }
   },
 
-  getAll: async (collectionName: string) => {
-    return localDb.getCollection(collectionName);
-  },
-
   getOne: async (collectionName: string, id: string) => {
     try {
-      const d = await getDoc(doc(db, collectionName, id));
-      if (!d.exists()) return null;
-      return { id: d.id, ...d.data() };
+      const items = await localDb.getAll(collectionName);
+      return items.find((i: any) => i.id === id);
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `${collectionName}/${id}`);
+      console.error(`Error getting one from ${collectionName}:`, err);
       return null;
     }
   },
@@ -96,78 +34,81 @@ export const localDb = {
       const newDoc = {
         ...data,
         id,
-        createdAt: data.createdAt || serverTimestamp(),
-        updatedAt: serverTimestamp()
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
-      await setDoc(doc(db, collectionName, id), newDoc);
-      return newDoc;
+      
+      const res = await fetch(`/api/db/${collectionName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newDoc)
+      });
+      
+      if (!res.ok) throw new Error(`Add failed: ${res.statusText}`);
+      return await res.json();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, collectionName);
-      return null;
+      console.error(`Error adding to ${collectionName}:`, err);
+      throw err;
     }
   },
 
   update: async (collectionName: string, id: string, updates: any) => {
     try {
-      const docRef = doc(db, collectionName, id);
-      const updateData = {
-        ...updates,
-        updatedAt: serverTimestamp()
-      };
-      await updateDoc(docRef, updateData);
-      return { id, ...updateData };
+      const res = await fetch(`/api/db/${collectionName}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      
+      if (!res.ok) throw new Error(`Update failed: ${res.statusText}`);
+      return await res.json();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `${collectionName}/${id}`);
-      return null;
+      console.error(`Error updating ${collectionName}:`, err);
+      throw err;
     }
   },
 
   delete: async (collectionName: string, id: string) => {
     try {
-      await deleteDoc(doc(db, collectionName, id));
+      const res = await fetch(`/api/db/${collectionName}/${id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error(`Delete failed: ${res.statusText}`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${id}`);
+      console.error(`Error deleting from ${collectionName}:`, err);
+      throw err;
     }
   },
 
   query: async (collectionName: string, filterFn: (item: any) => boolean) => {
-    const items = await localDb.getCollection(collectionName);
+    const items = await localDb.getAll(collectionName);
     return items.filter(filterFn);
   }
 };
 
+// Simplified local-first auth via server
 export const localAuth = {
-  getCurrentUserAsync: (): Promise<any> => {
-    return new Promise((resolve) => {
-      const unsubscribe = onAuthStateChanged(auth, (user) => {
-        unsubscribe();
-        if (user) {
-          resolve(user);
-        } else {
-          resolve(null);
-        }
-      });
-    });
+  getCurrentUserAsync: async (): Promise<any> => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (!res.ok) throw new Error('Auth fetch failed');
+      return await res.json();
+    } catch (err) {
+      return null;
+    }
   },
   
-  getCurrentUser: () => auth.currentUser,
+  getCurrentUser: () => {
+    // Note: This matches the persistent server state
+    // For synchronous access, we might still need a simple state wrapper
+    return null; // Should be handled by loading the async version on init
+  },
   
   login: async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      const result = await signInWithPopup(auth, provider);
-      return result.user;
-    } catch (error) {
-      console.error("Login failed:", error);
-      throw error;
-    }
+    return localAuth.getCurrentUserAsync();
   },
 
   logout: async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error("Logout failed:", err);
-    }
+    await fetch('/api/auth/logout', { method: 'POST' });
   }
 };

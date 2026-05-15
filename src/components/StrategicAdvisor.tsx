@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { useState, useRef, useEffect } from 'react';
 import { localDb, localAuth } from '../services/storage';
 import { Client, KnowledgeEntry, AgentSkill, EvolutionProposal, AgentInteraction, LLMProvider, LLMConfig } from '../types';
@@ -163,7 +164,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     try {
       const user = await localAuth.getCurrentUserAsync();
       const config: LLMConfig = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         displayName: newLLM.displayName!,
         provider: newLLM.provider!,
         modelId: newLLM.modelId!,
@@ -251,7 +252,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       setQueryText('');
       
       const historyEntry: Partial<AgentInteraction> = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         type: 'reasoning',
         query: queryText,
         result: dehydratedResult,
@@ -315,7 +316,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     setIsEvaluating(true);
     try {
       const user = await localAuth.getCurrentUserAsync();
-      const proposalId = crypto.randomUUID();
+      const proposalId = uuidv4();
       const proposal: any = {
         id: proposalId,
         ...(evaluationResult.refinedProposal || {}),
@@ -325,7 +326,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       };
       await localDb.add('evolution_proposals', proposal);
       
-      const skillId = crypto.randomUUID();
+      const skillId = uuidv4();
       const newSkill: any = {
         id: skillId,
         name: evaluationResult?.refinedProposal?.suggestedSkillName || manualProposal.name,
@@ -345,7 +346,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       });
 
       await localDb.add('agent_logs', {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         type: 'reasoning',
         query: '手动注入进化提案: ' + manualProposal.name,
         result: {
@@ -378,7 +379,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         name: result?.refinedProposal?.suggestedSkillName || proposal.suggestedSkillName,
         description: result?.refinedProposal?.suggestedSkillDescription || proposal.suggestedSkillDescription,
         code: "// Simulated evolved code bundle",
-        id: crypto.randomUUID()
+        id: uuidv4()
       };
 
       await localDb.add('skills', {
@@ -704,7 +705,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
 
                                   const user = localAuth.getCurrentUser();
                                   const historyEntry: Partial<AgentInteraction> = {
-                                    id: crypto.randomUUID(),
+                                    id: uuidv4(),
                                     type: 'lab',
                                     query: `[${labType}] ${labReqs}`,
                                     result: {

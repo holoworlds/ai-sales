@@ -37,87 +37,46 @@ import {
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 
-function KnowledgeCard({ entry, idx, CatIcon, selectedEntries, setSelectedEntries, handleDelete }: any) {
-  const [isHovered, setIsHovered] = useState(false);
-
+function KnowledgeCard({ entry, idx, selectedEntries, setSelectedEntries, handleDelete }: any) {
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: idx * 0.05 }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className="bg-white border border-gray-200 p-10 rounded-[2.5rem] relative group overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all"
+      transition={{ delay: idx * 0.03 }}
+      className="bg-white border border-gray-100 p-4 rounded-xl relative group hover:shadow-md transition-all flex items-center justify-between gap-3"
     >
-      <div className="absolute top-6 left-6 z-10">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
         <input 
           type="checkbox"
           checked={selectedEntries.includes(entry.id)}
           onChange={() => setSelectedEntries((prev: string[]) => 
             prev.includes(entry.id) ? prev.filter(id => id !== entry.id) : [...prev, entry.id]
           )}
-          className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
         />
-      </div>
-
-      <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-bl-[4rem] flex items-center justify-center -mr-8 -mt-8 group-hover:bg-blue-50 transition-colors">
-         <CatIcon className="w-8 h-8 text-gray-200 group-hover:text-blue-100 transition-colors" />
-      </div>
-      
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${
-            entry.sourceType === 'document' ? 'bg-blue-50 border-blue-100 text-blue-600' :
-            entry.sourceType === 'feedback' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-            entry.sourceType === 'word' ? 'bg-indigo-50 border-indigo-100 text-indigo-600' :
-            entry.sourceType === 'pdf' ? 'bg-red-50 border-red-100 text-red-600' :
-            entry.sourceType === 'excel' ? 'bg-emerald-100 border-emerald-200 text-emerald-800' :
-            entry.sourceType === 'ppt' ? 'bg-orange-50 border-orange-100 text-orange-600' :
-            'bg-purple-50 border-purple-100 text-purple-600'
-          }`}>
-            {entry.sourceType === 'document' ? '文档集群' : 
-             entry.sourceType === 'feedback' ? '反馈循环' : 
-             entry.sourceType === 'word' ? 'WORD 文档' :
-             entry.sourceType === 'pdf' ? 'PDF文件' :
-             entry.sourceType === 'excel' ? 'EXCEL 表格' :
-             entry.sourceType === 'ppt' ? 'PPT 演示' :
-             '市场情报'}
-          </span>
-          <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest flex items-center gap-2">
-             <Clock className="w-3.5 h-3.5" />
-             {entry.createdAt ? (entry.createdAt.toDate ? entry.createdAt.toDate().toISOString().split('T')[0] : new Date(entry.createdAt).toISOString().split('T')[0]) : '刚刚'}
-          </span>
+        
+        <div className="flex flex-col min-w-0">
+          <h3 className="text-xs font-bold tracking-tight text-[#1A1C1E] group-hover:text-blue-600 transition-colors uppercase truncate">
+            {entry.title}
+          </h3>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {entry.tags.slice(0, 2).map((tag: string) => (
+              <span key={tag} className="text-[7.5px] font-black text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100 flex items-center gap-1">
+                <Tag className="w-1.5 h-1.5 text-blue-400" />
+                {tag.toUpperCase()}
+              </span>
+            ))}
+            {entry.tags.length > 2 && <span className="text-[7.5px] text-gray-300">+{entry.tags.length - 2}</span>}
+          </div>
         </div>
-          {isHovered && (
-            <motion.button 
-              initial={{ opacity: 0, scale: 0.8, x: 10 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.8, x: 10 }}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={(e) => handleDelete(entry.id, e)}
-              className="p-3 text-red-500 bg-red-50 rounded-2xl transition-all shadow-xl shadow-red-500/10 border border-red-100/50 flex items-center justify-center"
-              title="永久移除此资产"
-            >
-               <Trash2 className="w-4 h-4" />
-            </motion.button>
-          )}
       </div>
 
-      <h3 className="text-2xl font-bold tracking-tight text-[#1A1C1E] mb-4 leading-tight">{entry.title}</h3>
-      
-      <div className="text-sm text-gray-600 leading-relaxed mb-8 line-clamp-3 font-medium">
-        {entry.content}
-      </div>
-
-      <div className="flex flex-wrap gap-3 pt-6 border-t border-gray-50">
-        {entry.tags.map((tag: string) => (
-          <span key={tag} className="text-[10px] font-bold text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg flex items-center gap-2 hover:bg-gray-100 transition-colors cursor-default">
-            <Tag className="w-3 h-3 text-blue-400" />
-            #{tag.toUpperCase()}
-          </span>
-        ))}
-      </div>
+      <button 
+        onClick={(e) => handleDelete(entry.id, e)}
+        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 shrink-0"
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
     </motion.div>
   );
 }
@@ -218,8 +177,25 @@ export default function KnowledgeBase() {
     setQaHistory(prev => [...prev, { role: 'user', content: currentQuery }]);
 
     try {
-      // Build context from all current knowledge base entries
-      const context = entries.map(e => `【${e.title}】: ${e.content}`).join('\n\n');
+      // 1. Get selected entries
+      let contextEntries = entries.filter(e => selectedEntries.includes(e.id));
+      
+      // 2. If query seems related to tags or we need more context, find by tag similarity
+      if (contextEntries.length < 5) {
+        // Simple tag matching for "AI Marketing" or content keywords
+        const keywords = currentQuery.toLowerCase().split(/\s+/).filter(k => k.length > 1);
+        const autoTags = entries.filter(e => 
+          !selectedEntries.includes(e.id) && 
+          e.tags?.some(t => keywords.includes(t.toLowerCase()) || t.toLowerCase().includes('marketing') || t.toLowerCase().includes('ai'))
+        );
+        contextEntries = [...contextEntries, ...autoTags.slice(0, 5)];
+      }
+
+      // Build context from filtered entries
+      const context = contextEntries.length > 0 
+        ? contextEntries.map(e => `【${e.title}】: ${e.content}`).join('\n\n')
+        : entries.slice(0, 5).map(e => `【${e.title}】: ${e.content}`).join('\n\n'); // Fallback to fresh docs if nothing found
+
       const response = await queryKnowledgeBase(currentQuery, context);
       const safeResponse = typeof response === 'string' ? response : JSON.stringify(response);
       setQaHistory(prev => [...prev, { role: 'ai', content: safeResponse }]);
@@ -291,6 +267,7 @@ export default function KnowledgeBase() {
       const fileName = file.name;
       const fileExt = fileName.split('.').pop()?.toLowerCase();
 
+      // Show processing state would be nice, but for now we'll just handle it
       if (fileExt === 'xlsx' || fileExt === 'xls') {
         const reader = new FileReader();
         reader.onload = async (evt) => {
@@ -301,17 +278,25 @@ export default function KnowledgeBase() {
             const rawData: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
 
             for (const row of rawData) {
+              const content = row['内容'] || row['Content'] || JSON.stringify(row);
+              // Auto-extract tags for each row if not present
+              let tags = (row['标签'] || row['Tags'] || '').split(',').map((t: string) => t.trim()).filter(Boolean);
+              if (tags.length === 0) {
+                 const insights = await extractKnowledgeInsights(content);
+                 if (insights.tags) tags = insights.tags;
+              }
+
               await localDb.add('knowledge', {
                 title: row['标题'] || row['Title'] || `来自 ${fileName}`,
-                content: row['内容'] || row['Content'] || JSON.stringify(row),
+                content: content,
                 sourceType: 'excel',
-                tags: (row['标签'] || row['Tags'] || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+                tags: tags,
                 category: 'industry',
                 ownerId: user.uid
               });
             }
             await fetchData();
-            alert(`成功从 Excel 导入 ${rawData.length} 条知识点`);
+            alert(`成功从 Excel 导入 ${rawData.length} 条知识点且已完成 AI 标签挂载`);
             setShowSuccess(true);
             setTimeout(() => {
               setShowSuccess(false);
@@ -329,10 +314,18 @@ export default function KnowledgeBase() {
         reader.onload = async (evt) => {
           try {
             const text = evt.target?.result as string;
+            setExtracting(true);
+            const fileNameClean = fileName.replace(/\.[^/.]+$/, "");
+            
+            // Auto-trigger AI extraction for better tags and title
+            const insights = await extractKnowledgeInsights(text);
+            
             setNewEntry(prev => ({
               ...prev,
-              title: fileName.replace(/\.[^/.]+$/, ""),
+              title: insights.suggestedTitle || fileNameClean,
               content: text,
+              tags: Array.isArray(insights.tags) ? insights.tags.join(', ') : (insights.tags || ''),
+              category: insights.category || 'strategy',
               sourceType: fileExt === 'pdf' ? 'pdf' : 
                           (fileExt === 'doc' || fileExt === 'docx' ? 'word' : 
                           (fileExt === 'ppt' || fileExt === 'pptx' ? 'ppt' : 'document'))
@@ -340,6 +333,8 @@ export default function KnowledgeBase() {
           } catch (err) {
             console.error("[KnowledgeBase] File read processing error:", err);
             alert('文件处理失败');
+          } finally {
+            setExtracting(false);
           }
         };
         reader.readAsText(file);
@@ -438,32 +433,40 @@ export default function KnowledgeBase() {
         })}
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-10 min-h-0 overflow-hidden">
-        {/* Q&A Section */}
-        <div className="lg:col-span-1 border-r border-gray-100 pr-6 flex flex-col min-h-0">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0 overflow-hidden">
+        {/* Q&A Section - Larger */}
+        <div className="lg:col-span-7 border-r border-gray-100 pr-6 flex flex-col min-h-0 bg-white/40 p-6 rounded-[2.5rem]">
            <div className="mb-6 flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-[#1A1C1E] flex items-center gap-2">
-                 <MessageSquare className="w-4 h-4 text-blue-600" />
+                 <MessageSquare className="w-5 h-5 text-blue-600" />
                  战略助手问答
               </h3>
-              <button onClick={() => setQaHistory([])} className="text-[10px] font-bold text-gray-400 hover:text-red-500 uppercase transition-colors">清除对话</button>
+              <div className="flex items-center gap-3">
+                 {selectedEntries.length > 0 && (
+                    <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                      限定 {selectedEntries.length} 篇
+                    </span>
+                 )}
+                 <button onClick={() => setQaHistory([])} className="text-[10px] font-bold text-gray-400 hover:text-red-500 uppercase transition-colors">清除</button>
+              </div>
            </div>
            
-           <div className="flex-1 overflow-y-auto mb-6 space-y-4 no-scrollbar bg-gray-50/50 rounded-3xl p-6 border border-gray-100 shadow-inner">
+           <div className="flex-1 overflow-y-auto mb-6 space-y-6 no-scrollbar bg-white rounded-[2rem] p-8 border border-gray-100 shadow-sm">
               {qaHistory.length === 0 ? (
                  <div className="h-full flex flex-col items-center justify-center text-center opacity-40 py-10 px-4">
-                    <Sparkles className="w-8 h-8 text-blue-400 mb-4" />
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                       基于知识库现状<br />提供决策建议与检索
+                    <Sparkles className="w-10 h-10 text-blue-400 mb-6" />
+                    <p className="text-base font-bold text-gray-900 mb-2">欢迎使用战略大脑</p>
+                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400 leading-relaxed">
+                       基于所选文档集及标签关联<br />进行深度营销战略检索与博弈分析
                     </p>
                  </div>
               ) : (
                 qaHistory.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[90%] px-4 py-3 rounded-2xl text-[11px] leading-relaxed font-medium ${
+                    <div className={`max-w-[95%] px-6 py-4 rounded-[1.5rem] text-sm leading-relaxed font-medium ${
                       msg.role === 'user' 
-                        ? 'bg-blue-600 text-white shadow-lg' 
-                        : 'bg-white border border-gray-200 text-gray-700 shadow-sm'
+                        ? 'bg-[#1A1C1E] text-white shadow-xl' 
+                        : 'bg-gray-50 border border-gray-200 text-gray-800'
                     }`}>
                       {msg.content}
                     </div>
@@ -472,9 +475,9 @@ export default function KnowledgeBase() {
               )}
               {isQuerying && (
                 <div className="flex justify-start">
-                   <div className="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex items-center gap-2">
-                      <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">大脑沉思中...</span>
+                   <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center gap-3">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                      <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">神经网络正在检索符合要求的节点...</span>
                    </div>
                 </div>
               )}
@@ -485,151 +488,85 @@ export default function KnowledgeBase() {
                 type="text" 
                 value={qaQuery}
                 onChange={e => setQaQuery(e.target.value)}
-                placeholder="询问知识库..."
-                className="w-full bg-white border border-gray-200 px-5 py-4 pr-14 rounded-2xl text-[11px] outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-medium placeholder:text-gray-300 shadow-sm"
+                placeholder="询问知识库 (默认检索所选文档 + 标签关联文档)..."
+                className="w-full bg-white border-2 border-gray-100 px-8 py-5 pr-20 rounded-[2rem] text-sm outline-none focus:border-blue-500 transition-all font-medium placeholder:text-gray-300 shadow-xl shadow-gray-200/20"
               />
               <button 
                 type="submit"
                 disabled={!qaQuery.trim() || isQuerying}
-                className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 bg-blue-600 text-white rounded-xl flex items-center justify-center hover:bg-blue-700 transition-all disabled:opacity-30 active:scale-90"
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-[#1A1C1E] text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 transition-all disabled:opacity-30 active:scale-90 shadow-lg"
               >
-                 <Send className="w-4 h-4" />
+                 <Send className="w-6 h-6" />
               </button>
            </form>
         </div>
 
-        {/* Main List */}
-        <div className="lg:col-span-2 overflow-y-auto pr-2 no-scrollbar space-y-6">
-          {loading ? (
-             <div className="space-y-4">
-                {[1, 2, 3].map(i => (
-                   <div key={i} className="h-40 bg-white border border-gray-100 rounded-3xl animate-pulse" />
+        {/* Main List & Sidebar */}
+        <div className="lg:col-span-5 flex flex-col min-h-0 overflow-hidden gap-8">
+           {/* Main List */}
+           <div className="flex-1 overflow-y-auto pr-2 no-scrollbar space-y-4">
+              <div className="flex items-center justify-between mb-4">
+                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">文档集群 ({filtered.length})</h3>
+                 <div className="flex items-center gap-4">
+                    <button 
+                       onClick={() => setSelectedEntries(entries.map(e => e.id))}
+                       className="text-[9px] font-bold text-blue-600 hover:underline"
+                    >全选</button>
+                    <button 
+                       onClick={() => setSelectedEntries([])}
+                       className="text-[9px] font-bold text-gray-400 hover:underline"
+                    >清除</button>
+                 </div>
+              </div>
+              <div className="space-y-2">
+                {loading ? (
+                  <div className="space-y-2">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <div key={i} className="h-16 bg-gray-50 border border-gray-100 rounded-xl animate-pulse" />
+                      ))}
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="h-full min-h-[200px] flex flex-col items-center justify-center bg-gray-50 border border-gray-200 border-dashed rounded-[2rem] text-gray-400 p-10 text-center">
+                      <Brain className="w-10 h-10 text-gray-200 mb-6" />
+                      <h3 className="text-base font-bold text-gray-900 mb-1">未发现目标集群</h3>
+                      <p className="text-[10px] max-w-xs mx-auto">请尝试更换检索关键词或注入新节点。</p>
+                  </div>
+                ) : (
+                  filtered.map((entry, idx) => (
+                    <KnowledgeCard 
+                      key={entry.id} 
+                      entry={entry} 
+                      idx={idx} 
+                      selectedEntries={selectedEntries} 
+                      setSelectedEntries={setSelectedEntries} 
+                      handleDelete={handleDelete} 
+                    />
+                  ))
+                )}
+              </div>
+           </div>
+
+           {/* Labels Stats */}
+           <div className="bg-white border border-gray-100 p-6 rounded-[2rem] shadow-sm shrink-0">
+              <h3 className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
+                <Tag className="w-3 h-3 text-blue-600" /> 标签过滤
+              </h3>
+              <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto no-scrollbar">
+                {allTags.map(tag => (
+                    <button
+                      key={tag}
+                      onClick={() => setSelectedTags(prev => 
+                          prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+                      )}
+                      className={`px-2 py-1 rounded-lg text-[8px] font-bold uppercase transition-all ${
+                          selectedTags.includes(tag)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                      }`}
+                    >
+                      #{tag.toLowerCase()}
+                    </button>
                 ))}
-             </div>
-          ) : filtered.length === 0 ? (
-             <div className="h-full min-h-[400px] flex flex-col items-center justify-center bg-white border border-gray-200 border-dashed rounded-[3rem] text-gray-400 p-10 text-center">
-                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6">
-                   <Brain className="w-10 h-10 text-gray-200" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">未发现目标集群</h3>
-                <p className="text-sm max-w-xs mx-auto">请尝试更换检索关键词或在该目录下注入新节点。</p>
-             </div>
-          ) : (
-            filtered.map((entry, idx) => {
-              const category = categories.find(c => c.id === (entry as any).category) || categories[1];
-              const CatIcon = category.icon;
-              
-              return (
-                <KnowledgeCard 
-                  key={entry.id} 
-                  entry={entry} 
-                  idx={idx} 
-                  CatIcon={CatIcon} 
-                  selectedEntries={selectedEntries} 
-                  setSelectedEntries={setSelectedEntries} 
-                  handleDelete={handleDelete} 
-                />
-              );
-            })
-          )}
-        </div>
-
-        {/* Intelligence Stats / Sidebar */}
-        <div className="hidden lg:flex flex-col gap-8 overflow-y-auto pr-2 no-scrollbar">
-           <div className="bg-white border border-gray-200 p-10 rounded-[3rem] shadow-sm">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8 flex items-center gap-3">
-                <Tag className="w-4 h-4 text-blue-600" />
-                标签过滤器
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                 {allTags.length === 0 ? (
-                    <div className="text-[10px] text-gray-300 font-bold uppercase py-4">暂无可用标签</div>
-                 ) : (
-                    allTags.map(tag => (
-                       <button
-                          key={tag}
-                          onClick={() => setSelectedTags(prev => 
-                             prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-                          )}
-                          className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all ${
-                             selectedTags.includes(tag)
-                               ? 'bg-blue-600 text-white shadow-md'
-                               : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
-                          }`}
-                       >
-                          #{tag}
-                       </button>
-                    ))
-                 )}
-              </div>
-              {selectedTags.length > 0 && (
-                 <button 
-                  onClick={() => setSelectedTags([])}
-                  className="mt-6 w-full py-3 text-[10px] font-black uppercase text-blue-600 hover:underline"
-                 >
-                    清除所有筛选
-                 </button>
-              )}
-           </div>
-
-           <div className="bg-[#1A1C1E] text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-emerald-500" />
-              <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl" />
-              
-              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/30 mb-8 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-blue-400" />
-                网络指标
-              </h3>
-              
-              <div className="space-y-10 relative z-10">
-                 <div>
-                    <div className="text-5xl font-black tracking-tighter mb-1">{entries.length}</div>
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">已锁定知识集群</div>
-                 </div>
-                 
-                 <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                       <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">密度指数</span>
-                       <span className="text-xs font-bold text-blue-400">82.4%</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                       <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: '82.4%' }}
-                        className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
-                       />
-                    </div>
-                 </div>
-                 
-                 <p className="text-[11px] font-medium text-white/50 leading-relaxed">
-                   神经模型的准确性随主动注入而扩展。预计在下次数据库同步时进行覆盖优化。
-                 </p>
-              </div>
-           </div>
-
-           <div className="bg-white border border-gray-200 p-10 rounded-[3rem] shadow-sm">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8 flex items-center gap-3">
-                <Layers className="w-4 h-4 text-blue-600" />
-                活动学习轨道
-              </h3>
-              <div className="space-y-6">
-                 {[
-                   '市场扩张 Q3',
-                   '客户情绪脉动',
-                   '产品差异化 v2'
-                 ].map((item, i) => (
-                   <div key={item} className="flex items-center group cursor-pointer">
-                      <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 mr-4 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
-                         <span className="text-[10px] font-bold">{i + 1}</span>
-                      </div>
-                      <span className="text-[11px] font-bold text-gray-600 uppercase tracking-tight group-hover:text-gray-900 transition-colors flex-1">{item}</span>
-                      <ChevronRight className="w-4 h-4 text-gray-200 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
-                   </div>
-                 ))}
-                 
-                 <button className="w-full py-4 mt-4 border border-gray-100 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:bg-gray-50 transition-all">
-                   管理所有学习项
-                 </button>
               </div>
            </div>
         </div>

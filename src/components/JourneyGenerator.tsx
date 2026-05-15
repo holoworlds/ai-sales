@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect } from 'react';
 import { localDb, localAuth } from '../services/storage';
 import { Product, JourneyLog } from '../types';
@@ -80,7 +81,7 @@ export default function JourneyGenerator() {
     try {
       const user = await localAuth.getCurrentUserAsync();
       const product: Product = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         name: newProduct.name!,
         industry: newProduct.industry!,
         coreValue: newProduct.coreValue!,
@@ -132,7 +133,7 @@ export default function JourneyGenerator() {
       // Save to history
       const user = await localAuth.getCurrentUserAsync();
       const logEntry: JourneyLog = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         productId: activeProduct.id,
         productName: activeProduct.name,
         customerMessage: customerMessage,
