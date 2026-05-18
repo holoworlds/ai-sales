@@ -177,7 +177,17 @@ service cloud.firestore {
                          isValidId(interactionId) &&
                          isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
                          isValidInteraction(incoming()) && 
-                         incoming().timestamp == request.time;
+                         (incoming().timestamp is timestamp || incoming().timestamp is string);
+      }
+
+      match /consultations/{consultationId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId);
+        allow create: if isSignedIn() && 
+                         isValidId(consultationId) &&
+                         isOwner(get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId) && 
+                         (incoming().role in ['user', 'ai']) &&
+                         incoming().content is string &&
+                         (incoming().timestamp is timestamp || incoming().timestamp is string);
       }
 
       match /content/{contentId} {

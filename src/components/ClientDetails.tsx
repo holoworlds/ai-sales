@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { localDb, localAuth } from '../services/storage';
 import { Client, Interaction, ContentAsset, ClientStage } from '../types';
 import { generateMarketingReply, analyzeClientStage, generateContentAsset, consultClientStrategy, generateClientJourney, generateMeetingIntelligence, generateRealtimeInputSuggestion } from '../services/gemini';
@@ -41,14 +41,26 @@ interface ClientDetailsProps {
 }
 
 export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
+  const isMounted = useRef(true);
+  
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'interactions' | 'content' | 'analysis' | 'consult' | 'briefing'>('interactions');
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [contentAssets, setContentAssets] = useState<ContentAsset[]>([]);
+  const [knowledge, setKnowledge] = useState<any[]>([]);
   
   // Interaction Form
   const [newInteraction, setNewInteraction] = useState('');
   const [generatingReply, setGeneratingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTimestamp, setErrorTimestamp] = useState<number>(0);
+  const [errorCountdown, setErrorCountdown] = useState(0);
   const [aiReply, setAiReply] = useState('');
 
   const safeDateFormat = (date: any) => {
@@ -122,6 +134,8 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
   const [generatingBriefing, setGeneratingBriefing] = useState(false);
   const [briefingResult, setBriefingResult] = useState<any>(null);
   const [viewingHistoryBriefingId, setViewingHistoryBriefingId] = useState<string | null>(null);
+  const [editingBriefingId, setEditingBriefingId] = useState<string | null>(null);
+  const [editingBriefingTitle, setEditingBriefingTitle] = useState('');
   const [showHistoryRawInput, setShowHistoryRawInput] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [debouncedSuggestion, setDebouncedSuggestion] = useState<string | null>(null);
@@ -133,10 +147,32 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
     }
   }, [interactions]);
 
+  const consultScrollRef = useCallback((node: HTMLDivElement) => {
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [consultHistory]);
+
   useEffect(() => {
     setLocalNextActionCompleted(client.nextActionCompleted);
   }, [client.nextActionCompleted]);
 
+  useEffect(() => {
+    if (error) {
+      setErrorCountdown(5);
+      const timer = setInterval(() => {
+        setErrorCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [error, errorTimestamp]);
+  
   // Real-time suggestion effect
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -165,7 +201,8 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
     if (!ts) return 0;
     if (ts.toDate) return ts.toDate().getTime();
     if (ts.seconds) return ts.seconds * 1000;
-    return new Date(ts).getTime();
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
   const fetchData = useCallback(async () => {
@@ -187,6 +224,9 @@ export default function ClientDetails({ client, onBack }: ClientDetailsProps) {
       const cData = await localDb.getAll(`clients/${client.id}/content` as any);
       cData.sort((a: any, b: any) => getTimestamp(b.createdAt) - getTimestamp(a.createdAt));
       setContentAssets(cData);
+
+      const kData = await localDb.getAll('knowledge');
+      setKnowledge(kData);
     } catch (error) {
       console.error("[ClientDetails] fetchData error:", error);
       setError("从数据库读取数据失败，请重试。");
@@ -360,19 +400,22 @@ MEETING INTELLIGENCE & PROJECT UPDATES:
 ${briefings}
       `.trim();
 
-      const result = JSON.parse(JSON.stringify(await analyzeClientStage(textLog)));
+      const rawResult = await analyzeClientStage(textLog);
+      const result = JSON.parse(JSON.stringify(rawResult));
+      
+      if (result.error) {
+        throw new Error(result.message || '分析引擎返回了错误结构');
+      }
+
       setAnalysisResult(result);
       
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + (result.recommendedFollowupDays || 7));
 
-      await localDb.update('clients', client.id, {
-        stage: result.stage,
-        decisionMatrix: result.matrix,
-        nextActionSuggestion: result.nextActionSuggestion,
+      const updates: any = {
+        decisionMatrix: result.matrix || client.decisionMatrix,
+        nextActionSuggestion: result.nextActionSuggestion || client.nextActionSuggestion,
         nextActionDate: nextDate,
-        projectScore: result.scoreDetails.total,
-        scoreDetails: result.scoreDetails,
         promoter: result.extractedFields?.promoter || client.promoter,
         promoterDept: result.extractedFields?.promoterDept || client.promoterDept,
         keyPerson: result.extractedFields?.keyPerson || client.keyPerson,
@@ -382,7 +425,49 @@ ${briefings}
         resistancePoint: result.extractedFields?.resistancePoint || client.resistancePoint,
         missingMaterials: result.extractedFields?.missingMaterials || client.missingMaterials,
         progress: result.extractedFields?.progress || client.progress,
-      });
+      };
+
+      // Handle Manual Stage Override
+      if (!localClient.isStageManual) {
+        updates.stage = result.stage || client.stage;
+      }
+
+      // Handle Manual Score Overrides
+      const manualScores = localClient.manualScoreDetails || {};
+      const newScoreDetails = { ...(client.scoreDetails || { strategicValue: 0, feasibility: 0, progress: 0, breakdown: {} }) };
+      const aiScoreDetails = result.scoreDetails || {};
+
+      if (!manualScores.strategicValue) {
+        newScoreDetails.strategicValue = aiScoreDetails.strategicValue ?? newScoreDetails.strategicValue;
+      }
+      if (!manualScores.feasibility) {
+        newScoreDetails.feasibility = aiScoreDetails.feasibility ?? newScoreDetails.feasibility;
+      }
+      if (!manualScores.progress) {
+        newScoreDetails.progress = aiScoreDetails.progress ?? newScoreDetails.progress;
+      }
+      
+      // Update breakdowns for non-manual categories
+      if (aiScoreDetails.breakdown) {
+         const newBreakdown = { ...(newScoreDetails.breakdown || {}) };
+         Object.keys(aiScoreDetails.breakdown).forEach(key => {
+            let category: string | null = null;
+            if (SCORE_BREAKDOWN_CONFIG.strategicValue.some(i => i.key === key)) category = 'strategicValue';
+            else if (SCORE_BREAKDOWN_CONFIG.feasibility.some(i => i.key === key)) category = 'feasibility';
+            else if (SCORE_BREAKDOWN_CONFIG.progress.some(i => i.key === key)) category = 'progress';
+
+            if (category && !manualScores[category as keyof typeof manualScores]) {
+               newBreakdown[key] = aiScoreDetails.breakdown[key];
+            }
+         });
+         newScoreDetails.breakdown = newBreakdown;
+      }
+
+      updates.scoreDetails = newScoreDetails;
+      updates.projectScore = (newScoreDetails.strategicValue || 0) + (newScoreDetails.feasibility || 0) + (newScoreDetails.progress || 0);
+
+      await localDb.update('clients', client.id, updates);
+      setLocalClient(prev => ({ ...prev, ...updates }));
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -433,12 +518,19 @@ ${briefings}
     if (!rawMeetingInput.trim()) return;
     setGeneratingBriefing(true);
     try {
-      const result = JSON.parse(JSON.stringify(await generateMeetingIntelligence(rawMeetingInput, {
+      const rawRes = await generateMeetingIntelligence(rawMeetingInput, {
         clientName: client.company,
         projectName: client.company, // Using company as project name for simple context
         currentPhase: client.stage,
         participants: [client.name]
-      })));
+      });
+      
+      const result = JSON.parse(JSON.stringify(rawRes));
+      
+      if (result.error) {
+        throw new Error(result.message || '会议摘要生成失败');
+      }
+
       setBriefingResult(result);
 
       // Save as a permanent asset
@@ -500,65 +592,94 @@ ${result.winningStrategy}
   };
 
   const handleConsult = async () => {
-    if (!consultationText.trim()) return;
-    const userMsg = consultationText;
+    if (!consultationText.trim() || consulting) return;
+
+    // 生成唯一追踪 ID
+    const consultId = Math.random().toString(36).substring(7);
+    const startTime = Date.now();
+    console.log(`[${consultId}] handleConsult initiated`, { textLength: consultationText.length });
+
+    const userMsg = consultationText.trim();
     setConsultationText('');
-    const timestamp = new Date().toISOString();
+    setConsulting(true);
+    setError(null);
     
     try {
       const user = await localAuth.getCurrentUser();
+      console.log(`[${consultId}] Auth checked`, { uid: user?.uid });
       
-      // Save User Message
-      await localDb.add(`clients/${client.id}/consultations` as any, {
+      const consultationRoomPath = `clients/${client.id}/consultations`;
+
+      // 1. Save User Message
+      await localDb.add(consultationRoomPath as any, {
         role: 'user',
         content: userMsg,
         timestamp: new Date().toISOString(),
         ownerId: user?.uid
       });
+      console.log(`[${consultId}] User message persistent`);
 
-      setConsulting(true);
-      setError(null);
-      
       await fetchData(); // Refresh history immediately after saving user msg
+      if (!isMounted.current) return;
 
       const context = `
         Client: ${localClient.company}
         Summary: ${localClient.memorySummary}
         Interactions: ${interactions.map(i => i.content).join('\n')}
       `;
-      const rawResult = await consultClientStrategy(userMsg, context);
+
+      const knowledgeContext = knowledge.length > 0
+        ? knowledge.map(k => `【${k.title}】: ${k.content}`).join('\n')
+        : "";
+
+      console.log(`[${consultId}] AI Request payload ready`, { contextSize: context.length });
+
+      const rawResult = await consultClientStrategy(userMsg, context, knowledgeContext, consultHistory);
+      if (!isMounted.current) return;
+      console.log(`[${consultId}] AI Response received`, { latency: Date.now() - startTime });
+
       const result = JSON.parse(JSON.stringify(rawResult));
       const aiReply = String(result?.reply || result?.content || (result?.error ? `⚠️ **AI 服务异常**\n\n${result?.message}` : 'AI 暂时无法给出有效回复，请稍后再试。'));
       
-      await localDb.add(`clients/${client.id}/consultations` as any, {
+      await localDb.add(consultationRoomPath as any, {
         role: 'ai',
         content: aiReply,
         timestamp: new Date().toISOString()
       });
+      console.log(`[${consultId}] AI message persistent`);
 
       if (result.suggestedUpdates) {
+        console.log(`[${consultId}] Processing suggested updates`, result.suggestedUpdates);
         const updates: any = { updatedAt: new Date().toISOString() };
         if (result.suggestedUpdates.memorySummary) updates.memorySummary = result.suggestedUpdates.memorySummary;
         if (result.suggestedUpdates.stage) updates.stage = result.suggestedUpdates.stage;
         if (result.suggestedUpdates.nextActionSuggestion) updates.nextActionSuggestion = result.suggestedUpdates.nextActionSuggestion;
         
         await localDb.update('clients', client.id, updates);
-        await refreshLocalClient();
+        setLocalClient(prev => ({ ...prev, ...updates }));
       }
       
       await fetchData(); // Refresh history again after AI reply
+      console.log(`[${consultId}] Full cycle completed successfully`);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || '对话研讨暂时中断，请重试');
+      console.error(`[${consultId}] CRITICAL ERROR:`, err);
+      if (isMounted.current) {
+        setError(err.message || '对话研讨暂时中断，请重试');
+        setErrorTimestamp(Date.now());
+      }
     } finally {
-      setConsulting(false);
+      if (isMounted.current) {
+        setConsulting(false);
+      }
     }
   };
 
   const handleSaveProfile = async () => {
     try {
+      const isStageManual = editForm.stage && editForm.stage !== client.stage;
       await localDb.update('clients', client.id, {
         ...editForm,
+        ...(isStageManual ? { isStageManual: true } : {})
       });
       await fetchData();
       setIsEditing(false);
@@ -577,10 +698,16 @@ ${result.winningStrategy}
     // Recalculate total project score
     const totalScore = (newScoreDetails.strategicValue || 0) + (newScoreDetails.feasibility || 0) + (newScoreDetails.progress || 0);
     
+    const manualScoreDetails = {
+      ...(client.manualScoreDetails || {}),
+      [category]: true
+    };
+
     try {
       await localDb.update('clients', client.id, {
         scoreDetails: newScoreDetails,
-        projectScore: totalScore
+        projectScore: totalScore,
+        manualScoreDetails
       });
       await fetchData();
     } catch (error) {
@@ -605,12 +732,18 @@ ${result.winningStrategy}
     
     const totalScore = (newScoreDetails.strategicValue || 0) + (newScoreDetails.feasibility || 0) + (newScoreDetails.progress || 0);
     
+    const manualScoreDetails = {
+      ...(client.manualScoreDetails || {}),
+      [category]: true
+    };
+
     try {
       await localDb.update('clients', client.id, {
         scoreDetails: newScoreDetails,
-        projectScore: totalScore
+        projectScore: totalScore,
+        manualScoreDetails
       });
-      refreshLocalClient();
+      setLocalClient(prev => ({ ...prev, scoreDetails: newScoreDetails, projectScore: totalScore, manualScoreDetails }));
     } catch (error) {
       console.error(error);
       setError("更新细分项评分失败");
@@ -658,7 +791,6 @@ ${result.winningStrategy}
                   <button 
                     onClick={async () => {
                       await handleAnalyze();
-                      await refreshLocalClient();
                     }}
                     disabled={analyzing}
                     className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg transition-all disabled:opacity-50 group"
@@ -704,7 +836,7 @@ ${result.winningStrategy}
                              nextActionSuggestion: null,
                              nextActionDate: null
                            });
-                           await refreshLocalClient();
+                           setLocalClient(prev => ({ ...prev, nextActionSuggestion: null, nextActionDate: null }));
                          } catch (err) {
                            console.error("Reject suggestion failed:", err);
                          }
@@ -722,7 +854,7 @@ ${result.winningStrategy}
                          await localDb.update('clients', localClient.id, {
                            nextActionCompleted: newState,
                          });
-                         await refreshLocalClient();
+                         setLocalClient(prev => ({ ...prev, nextActionCompleted: newState }));
                        } catch (err) { 
                          console.error(err);
                          setLocalNextActionCompleted(!newState); // Revert on failure
@@ -738,7 +870,13 @@ ${result.winningStrategy}
                    </button>
                 </div>
                 {error && (
-                  <div className="absolute top-full mt-2 right-0 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg text-[8px] text-red-500">
+                  <div 
+                    onClick={() => {
+                      const elapsed = Date.now() - errorTimestamp;
+                      if (elapsed > 3000) setError(null);
+                    }}
+                    className="absolute top-full mt-2 right-0 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg text-[8px] text-red-500 cursor-pointer"
+                  >
                     {error}
                   </div>
                 )}
@@ -760,7 +898,7 @@ ${result.winningStrategy}
                          await localDb.update('clients', localClient.id, {
                            nextActionDate: newDate,
                          });
-                         await refreshLocalClient();
+                         setLocalClient(prev => ({ ...prev, nextActionDate: newDate }));
                        } catch (err) {
                          console.error("Update date failed:", err);
                        }
@@ -1265,22 +1403,79 @@ ${result.winningStrategy}
                           </div>
                         ) : (
                           contentAssets.filter(a => a.type === 'Briefing').map((asset) => (
-                            <button 
-                              key={asset.id}
-                              onClick={() => setViewingHistoryBriefingId(asset.id)}
-                              className={`w-full text-left p-4 rounded-2xl transition-all border ${
-                                viewingHistoryBriefingId === asset.id 
-                                  ? 'bg-blue-600 border-blue-600 shadow-md transform scale-[1.02]' 
-                                  : 'bg-gray-50 border-gray-100 hover:border-blue-200'
-                              }`}
-                            >
-                               <div className={`text-[9px] font-black uppercase tracking-widest mb-1 ${viewingHistoryBriefingId === asset.id ? 'text-blue-200' : 'text-gray-400'}`}>
-                                  {asset.createdAt?.toDate ? asset.createdAt.toDate().toLocaleDateString() : '最近记录'}
-                               </div>
-                               <div className={`text-xs font-bold truncate ${viewingHistoryBriefingId === asset.id ? 'text-white' : 'text-gray-900'}`}>
-                                  {asset.title.replace('Meeting Intelligence & Progress - ', '')}
-                               </div>
-                            </button>
+                            <div key={asset.id} className="relative group/briefItem">
+                              {editingBriefingId === asset.id ? (
+                                <div className="p-4 bg-white border border-blue-600 rounded-2xl shadow-lg space-y-3">
+                                  <input 
+                                    autoFocus
+                                    value={editingBriefingTitle}
+                                    onChange={e => setEditingBriefingTitle(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-200 px-3 py-2 rounded-lg text-xs outline-none focus:border-blue-600"
+                                    onKeyDown={async (e) => {
+                                      if (e.key === 'Enter') {
+                                        try {
+                                          await localDb.update(`clients/${client.id}/content` as any, asset.id, { title: editingBriefingTitle });
+                                          await fetchData();
+                                          setEditingBriefingId(null);
+                                        } catch (err) { console.error(err); }
+                                      } else if (e.key === 'Escape') {
+                                        setEditingBriefingId(null);
+                                      }
+                                    }}
+                                  />
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={async () => {
+                                        try {
+                                          await localDb.update(`clients/${client.id}/content` as any, asset.id, { title: editingBriefingTitle });
+                                          await fetchData();
+                                          setEditingBriefingId(null);
+                                        } catch (err) { console.error(err); }
+                                      }}
+                                      className="flex-1 bg-blue-600 text-white text-[9px] py-1.5 rounded-lg font-bold uppercase"
+                                    >
+                                      保存
+                                    </button>
+                                    <button 
+                                      onClick={() => setEditingBriefingId(null)}
+                                      className="flex-1 bg-gray-100 text-gray-500 text-[9px] py-1.5 rounded-lg font-bold uppercase"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="relative">
+                                  <button 
+                                    onClick={() => setViewingHistoryBriefingId(asset.id)}
+                                    className={`w-full text-left p-4 rounded-2xl transition-all border ${
+                                      viewingHistoryBriefingId === asset.id 
+                                        ? 'bg-blue-600 border-blue-600 shadow-md transform scale-[1.02]' 
+                                        : 'bg-gray-50 border-gray-100 hover:border-blue-200'
+                                    }`}
+                                  >
+                                    <div className={`text-[9px] font-black uppercase tracking-widest mb-1 ${viewingHistoryBriefingId === asset.id ? 'text-blue-200' : 'text-gray-400'}`}>
+                                      {asset.createdAt?.toDate ? asset.createdAt.toDate().toLocaleDateString() : '最近记录'}
+                                    </div>
+                                    <div className={`text-xs font-bold truncate pr-6 ${viewingHistoryBriefingId === asset.id ? 'text-white' : 'text-gray-900'}`}>
+                                      {asset.title.replace('Meeting Intelligence & Progress - ', '')}
+                                    </div>
+                                  </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingBriefingId(asset.id);
+                                      setEditingBriefingTitle(asset.title);
+                                    }}
+                                    className={`absolute top-1/2 -translate-y-1/2 right-4 p-1.5 rounded-lg transition-all opacity-0 group-hover/briefItem:opacity-100 ${
+                                      viewingHistoryBriefingId === asset.id ? 'text-blue-100 hover:bg-blue-500' : 'text-gray-400 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           ))
                         )}
                      </div>
@@ -1541,20 +1736,23 @@ ${result.winningStrategy}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
-              className="flex-1 flex gap-10 h-full overflow-hidden"
+              className="flex-1 flex gap-10 min-h-0"
             >
-              <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-[2.5rem] shadow-sm overflow-hidden">
-                <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-[2.5rem] shadow-sm overflow-hidden min-h-[600px]">
+                <div className="px-8 py-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center shrink-0">
                    <div className="flex items-center gap-3">
                       <MessageCircle className="w-5 h-5 text-blue-600" />
-                      <h2 className="text-sm font-bold uppercase tracking-widest">战略研讨室</h2>
+                      <h2 className="text-[10px] font-bold uppercase tracking-widest text-gray-900">战略研讨室</h2>
                    </div>
-                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                      与 AI 教练共创策略
+                   <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase text-gray-400 tracking-widest">与 AI 教练共创策略</span>
                    </div>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar">
+                <div 
+                  ref={consultScrollRef}
+                  className="h-[550px] overflow-y-auto p-10 space-y-10 no-scrollbar bg-gray-50/30"
+                >
                   {consultHistory.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center space-y-6 opacity-30">
                        <BrainCircuit className="w-16 h-16 text-gray-300" />
@@ -1564,30 +1762,81 @@ ${result.winningStrategy}
                     </div>
                   ) : (
                     consultHistory.map((msg, idx) => (
-                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-6 rounded-[2rem] shadow-sm ${
+                      <div key={idx} className={`flex gap-6 items-start ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xs font-black shrink-0 shadow-lg ${
                           msg.role === 'user' 
-                            ? 'bg-blue-600 text-white rounded-tr-none' 
-                            : 'bg-gray-50 text-gray-900 border border-gray-100 rounded-tl-none'
+                            ? 'bg-blue-600 text-white' 
+                            : 'bg-indigo-600 text-white'
                         }`}>
-                          <div className="text-sm leading-relaxed prose-sm">
-                            <ReactMarkdown>{String(msg.content || '')}</ReactMarkdown>
+                          {msg.role === 'user' ? 'ME' : 'AI'}
+                        </div>
+                        <div className={`max-w-[80%] ${msg.role === 'user' ? 'text-right' : ''}`}>
+                          <div className={`inline-block text-sm p-6 rounded-3xl border shadow-sm ${
+                            msg.role === 'user' 
+                              ? 'bg-white border-blue-100 text-gray-800 rounded-tr-none text-left' 
+                              : 'bg-indigo-50 border-indigo-100 text-indigo-900 rounded-tl-none text-left'
+                          }`}>
+                            {msg.role === 'ai' && (
+                              <div className="flex items-center gap-2 mb-3 text-[9px] font-black uppercase tracking-widest text-indigo-600">
+                                <Sparkles className="w-3.5 h-3.5" /> AI 教练建议
+                              </div>
+                            )}
+                            <div className="prose-sm max-w-none">
+                              <ReactMarkdown>{String(msg.content || '')}</ReactMarkdown>
+                            </div>
+                          </div>
+                          <div className={`mt-3 flex items-center gap-4 px-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                            <div className="text-[8px] font-black uppercase text-gray-300 tracking-widest">
+                              {msg.timestamp ? (
+                                typeof msg.timestamp === 'string' 
+                                  ? new Date(msg.timestamp).toLocaleTimeString() 
+                                  : (msg.timestamp as any).toDate 
+                                    ? (msg.timestamp as any).toDate().toLocaleTimeString() 
+                                    : new Date(msg.timestamp as any).toLocaleTimeString()
+                              ) : '刚才'}
+                            </div>
                           </div>
                         </div>
                       </div>
                     ))
                   )}
                   {consulting && (
-                    <div className="flex justify-start">
-                      <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 rounded-tl-none flex items-center gap-3">
-                        <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">教练正在思考...</span>
+                    <div className="flex gap-6 items-start">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-xs font-black shrink-0 shadow-lg">
+                        AI
+                      </div>
+                      <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-3xl rounded-tl-none flex items-center gap-3">
+                        <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                        <span className="text-xs font-black uppercase tracking-widest text-indigo-400">教练正在深度思考局势...</span>
                       </div>
                     </div>
                   )}
                 </div>
 
                 <div className="p-8 border-t border-gray-100 bg-gray-50/50">
+                  {error && (
+                    <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+                      <div className="flex items-center gap-3">
+                        <ShieldAlert className="w-5 h-5 text-red-500" />
+                        <div>
+                          <p className="text-xs font-bold text-red-500">{error}</p>
+                          <p className="text-[9px] text-red-400/60 font-mono">
+                            {errorCountdown > 0 ? `系统正在锁定现场，请于 ${errorCountdown} 秒后重试` : '现场已锁定，您可以查看日志或尝试重置'}
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          if (errorCountdown > 0) return;
+                          setError(null);
+                        }}
+                        disabled={errorCountdown > 0}
+                        className={`p-2 transition-all ${errorCountdown > 0 ? 'text-gray-600 opacity-50' : 'text-red-500 hover:scale-110'}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                   <div className="flex gap-4 items-start">
                     <textarea 
                       rows={2}

@@ -17,8 +17,8 @@ const getActiveConfig = async (): Promise<LLMConfig | null> => {
   return {
     id: 'default-gemini',
     provider: LLMProvider.GOOGLE,
-    modelId: 'gemini-3-flash-preview',
-    displayName: 'Gemini (System Default)',
+    modelId: 'gemini-2.0-flash-exp',
+    displayName: 'Gemini 2.0 Flash (Default)',
     apiKey: (process.env as any).GEMINI_API_KEY || '', 
     isPrimary: true,
     status: 'Active',
@@ -29,10 +29,10 @@ const getActiveConfig = async (): Promise<LLMConfig | null> => {
 export const getActiveModel = async () => {
   try {
     const config = await getActiveConfig();
-    return config ? config.modelId : "gemini-3-flash-preview";
+    return config ? config.modelId : "gemini-2.0-flash-exp";
   } catch (error) {
     console.error('[LLM] getActiveModel Error:', error);
-    return "gemini-3-flash-preview";
+    return "gemini-2.0-flash-exp";
   }
 };
 
@@ -43,11 +43,10 @@ const cleanUrl = (url: string) => {
 
 export const sanitizeAIContent = (text: string): string => {
   if (!text) return '';
-  // Remove or replace characters that might trigger SES security errors
+  // Avoid heavy-handed sanitization if it looks like JSON or if it's meant to be parsed
+  // We'll just do minimal escaping for UI safety
   return text
     .replace(/\b(eval|Function|setInterval|setTimeout)\b/ig, '_$1_')
-    .replace(/[`$]/g, '') // Remove backticks and dollar signs to avoid template literal / variable injection issues
-    .replace(/[{}()\[\]]/g, (m) => ` ${m} `) // Add spaces around brackets to break potential code execution patterns
     .trim();
 };
 
@@ -59,110 +58,64 @@ export const callLLM = async (prompt: string, options: { json?: boolean, systemI
       throw new Error('未配置有效的模型');
     }
 
-    console.log(`[LLM] Calling ${config.provider} with model ${config.modelId}`);
-
-    let resultText = '';
-
-    if (config.provider === LLMProvider.GOOGLE) {
-      const apiKey = config.apiKey || (process.env as any).GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error('未找到有效的 Google Gemini API Key');
-      }
-
-      try {
-        const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1beta' });
-        
-        const response = await ai.models.generateContent({
-          model: config.modelId || 'gemini-1.5-flash',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: {
-            systemInstruction: options.systemInstruction,
-            responseMimeType: options.json ? 'application/json' : undefined
-          }
-        });
-
-        // Newer GenAI SDK might return nested text or response object
-        if (typeof (response as any).text === 'function') {
-          resultText = (response as any).text();
-        } else if (typeof response.text === 'string') {
-          resultText = response.text;
-        } else if ((response as any).response?.text) {
-          resultText = (response as any).response.text();
-        }
-
-        if (!resultText) {
-          console.warn('[LLM] Gemini returned empty response', response);
-          resultText = '';
-        }
-      } catch (error) {
-        console.error('[LLM] Gemini Error:', error);
-        throw error;
-      }
-    } else {
-      // OpenAI Compatible APIs (OpenAI, Deepseek, Kimi, etc.)
-      const baseUrl = cleanUrl(config.baseUrl) || 
-          (config.provider === LLMProvider.OPENAI ? 'https://api.openai.com/v1' : 
-           config.provider === LLMProvider.DEEPSEEK ? 'https://api.deepseek.com' :
-           config.provider === LLMProvider.KIMI ? 'https://api.moonshot.cn/v1' : '');
-
-      if (!baseUrl) throw new Error(`未指定供应商 ${config.provider} 的 Base URL`);
-
-      const endpoint = `${baseUrl}/chat/completions`;
-      console.log(`[LLM] Requesting ${endpoint}`);
-
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey || ''}`
-          },
-          body: JSON.stringify({
-            model: config.modelId,
-            messages: [
-              ...(options.systemInstruction ? [{ role: 'system', content: options.systemInstruction }] : []),
-              { role: 'user', content: prompt }
-            ],
-            response_format: options.json ? { type: "json_object" } : undefined,
-            temperature: 0.7,
-          })
-        }).catch(err => {
-          throw new Error(`网络连接失败: ${err.message}`);
-        });
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => 'Unknown error reply');
-          let errJson: any = { error: { message: response.statusText } };
-          try {
-            errJson = JSON.parse(errText);
-          } catch (e) {
-            console.warn('[LLM] Could not parse error response as JSON');
-          }
-          console.error('[LLM] HTTP Error:', response.status, errJson);
-          throw new Error(errJson.error?.message || `请求 LLM 失败 (${response.status})`);
-        }
-
-        const data = await response.json().catch(err => {
-          console.error('[LLM] JSON Parse Error:', err);
-          throw new Error('模型返回了无效的响应格式。');
-        });
-
-        if (!data.choices?.[0]?.message?.content) {
-          console.warn('[LLM] Provider returned empty content', data);
-          resultText = '';
-        } else {
-          resultText = data.choices[0].message.content;
-        }
-      } catch (error) {
-        console.error(`[LLM] ${config.provider} Error:`, error);
-        throw error;
-      }
+    const byteSize = new Blob([prompt]).size;
+    const originalLen = prompt.length;
+    
+    // TRUNCATION LOGIC (Requested for 413 diagnosis)
+    let finalPrompt = prompt;
+    const MAX_LEN = 40000; // Let's try 40k chars as a limit
+    if (finalPrompt.length > MAX_LEN) {
+      console.warn(`[LLM] Prompt truncated from ${originalLen} to ${MAX_LEN} chars`);
+      finalPrompt = finalPrompt.substring(0, MAX_LEN) + "\n... (Content truncated for length) ...";
     }
 
-    return sanitizeAIContent(resultText);
-  } catch (error) {
-    console.error('[LLM] callLLM total failure:', error);
-    // Returning an empty or safe response instead of letting it reject unhandled
-    return "";
+    console.log(`🔍 [callLLM] Request URL: /api/llm`);
+    console.log(`[LLM Request Check]
+      - Provider: ${config.provider}
+      - Model: ${config.modelId}
+      - Prompt Length: ${originalLen} chars
+      - Truncated Length: ${finalPrompt.length} chars
+      - Approx Bytes: ${byteSize}
+      - Body Size: ${JSON.stringify({
+        provider: config.provider,
+        modelId: config.modelId,
+        apiKey: '***',
+        baseUrl: config.baseUrl,
+        prompt: finalPrompt,
+        options
+      }).length} bytes
+      - Options: ${JSON.stringify(options)}
+    `);
+
+    const response = await fetch('/api/llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: config.provider,
+        modelId: config.modelId,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        prompt: finalPrompt,
+        options
+      })
+    }).catch(err => {
+      throw new Error(`无法连接到后端代理: ${err.message || String(err)}`);
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const msg = errData.message || `后端服务响应异常 (${response.status})`;
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    const content = data.content || '';
+    
+    // Only sanitize if not expecting JSON
+    return options.json ? content : sanitizeAIContent(content);
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+    console.error('[LLM] callLLM total failure:', errorMsg);
+    throw error;
   }
 };

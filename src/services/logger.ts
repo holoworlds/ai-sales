@@ -3,7 +3,9 @@ import { localDb } from './storage';
 import { ErrorLog } from '../types';
 
 const LOG_COLLECTION = 'errorLogs';
+const STORAGE_KEY = '_crash_logs';
 const MAX_LOGS = 200;
+const MAX_STORAGE_LOGS = 50;
 
 interface StateTracker {
   lastClickEvent?: ErrorLog['lastClickEvent'];
@@ -48,9 +50,38 @@ export const AppLogger = {
     if (state) tracker.appState = state;
   },
 
+  // Synchronous fallback for critical crashes
+  logToLocalStorage: (level: string, message: string, extra?: any) => {
+    try {
+      const logs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      logs.push({
+        timestamp: Date.now(),
+        level,
+        message,
+        extra,
+        url: typeof window !== 'undefined' ? window.location.href : 'N/A',
+        view: tracker.currentView,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A'
+      });
+      
+      if (logs.length > MAX_STORAGE_LOGS) logs.shift();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    } catch (e) {
+      // Ignore storage errors (quota etc)
+    }
+  },
+
   logError: async (error: Error, extra?: Partial<ErrorLog>) => {
+    const message = error.message || String(error);
+    
+    // 1. Immediate sync write to localStorage (most reliable for crashes)
+    AppLogger.logToLocalStorage('CRITICAL_ERROR', message, { 
+      stack: error.stack,
+      ...extra 
+    });
+
     const log: Omit<ErrorLog, 'id'> = {
-      message: error.message,
+      message: message,
       stack: error.stack,
       timestamp: new Date().toISOString(),
       route: tracker.currentRoute,
@@ -91,11 +122,20 @@ export const AppLogger = {
     return await localDb.getAll(LOG_COLLECTION);
   },
 
+  getCrashLogs: () => {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  },
+
   clearLogs: async () => {
     const logs = await localDb.getAll(LOG_COLLECTION);
     for (const log of logs) {
       await localDb.delete(LOG_COLLECTION, log.id);
     }
+    localStorage.removeItem(STORAGE_KEY);
   }
 };
 
@@ -103,18 +143,14 @@ export const AppLogger = {
 if (typeof window !== 'undefined') {
   window.addEventListener('click', (e) => AppLogger.trackClick(e), true);
   
-  window.onerror = (message, source, lineno, colno, error) => {
-    AppLogger.logError(error || new Error(String(message)), {
-      message: String(message),
-      browserInfo: {
-        userAgent: navigator.userAgent,
-        language: navigator.language,
-        platform: navigator.platform
-      }
+  // Use addEventListener for more robust listener stacking
+  window.addEventListener('error', (event) => {
+    AppLogger.logError(event.error || new Error(event.message || 'Unknown window error'), {
+      message: event.message,
     });
-  };
+  });
 
-  window.onunhandledrejection = (event) => {
+  window.addEventListener('unhandledrejection', (event) => {
     AppLogger.trackPromiseReject(event.reason);
     const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
     AppLogger.logError(error, {
@@ -123,5 +159,13 @@ if (typeof window !== 'undefined') {
         timestamp: Date.now()
       }
     });
+  });
+
+  // Intercept console.error to capture logged errors
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    originalConsoleError.apply(console, args);
+    const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    AppLogger.logToLocalStorage('CONSOLE_ERROR', message);
   };
 }

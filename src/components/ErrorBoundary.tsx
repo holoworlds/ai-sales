@@ -11,25 +11,47 @@ interface State {
   hasError: boolean;
   error?: Error;
   errorInfo?: ErrorInfo;
+  countdown: number;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
-    hasError: false
+    hasError: false,
+    countdown: 0
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    return { hasError: true, error, countdown: 5 };
   }
+
+  private errorStartTime: number = 0;
+  private timerRef: any = null;
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     AppLogger.logError(error, {
       componentStack: errorInfo.componentStack
     });
-    this.setState({ errorInfo });
+    this.setState({ errorInfo, countdown: 5 });
+    this.errorStartTime = Date.now();
+    
+    if (this.timerRef) clearInterval(this.timerRef);
+    this.timerRef = setInterval(() => {
+      this.setState(prev => {
+        if (prev.countdown <= 1) {
+          clearInterval(this.timerRef);
+          return { countdown: 0 };
+        }
+        return { countdown: prev.countdown - 1 };
+      });
+    }, 1000);
+  }
+
+  componentWillUnmount() {
+    if (this.timerRef) clearInterval(this.timerRef);
   }
 
   private handleReset = () => {
+    if (this.state.countdown > 0) return;
     this.setState({ hasError: false, error: undefined, errorInfo: undefined });
     window.location.href = '/';
   };
@@ -64,9 +86,18 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="flex gap-4">
               <button 
                 onClick={this.handleReset}
-                className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
+                disabled={this.state.countdown > 0}
+                className={`flex-1 py-5 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg ${
+                  this.state.countdown > 0
+                    ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'
+                }`}
               >
-                <RefreshCw size={16} /> 重置系统状态
+                {this.state.countdown > 0 ? (
+                  <>锁定保护中 ({this.state.countdown}s)</>
+                ) : (
+                  <><RefreshCw size={16} /> 重置系统状态</>
+                )}
               </button>
               <button 
                 onClick={() => window.location.reload()}

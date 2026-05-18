@@ -1,9 +1,11 @@
 {
   "name": "Nexus AI: 认知进化与记忆系统",
-  "description": "基于认知科学构建的下一代智能 Agent 框架，集成全链路错误追踪、多产品战略旅程预测及闭环进化历史系统。",
+  "description": "基于认知科学构建的下一代智能 Agent 框架，集成全链路错误追踪、多产品战略旅程预测、专家协同干预及层级化资产管理系统。",
   "requestFramePermissions": [
     "camera",
     "microphone"
   ],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

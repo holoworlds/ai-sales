@@ -91,7 +91,7 @@ export default function KnowledgeBase() {
   const [newEntry, setNewEntry] = useState({ 
     title: '', 
     content: '', 
-    sourceType: 'document' as 'document' | 'feedback' | 'market_report' | 'word' | 'ppt' | 'excel' | 'pdf', 
+    sourceType: 'document' as 'document' | 'feedback' | 'market_report' | 'word' | 'ppt' | 'excel' | 'pdf' | 'markdown', 
     tags: '',
     category: 'strategy'
   });
@@ -326,7 +326,8 @@ export default function KnowledgeBase() {
               content: text,
               tags: Array.isArray(insights.tags) ? insights.tags.join(', ') : (insights.tags || ''),
               category: insights.category || 'strategy',
-              sourceType: fileExt === 'pdf' ? 'pdf' : 
+              sourceType: fileExt === 'md' ? 'markdown' :
+                          fileExt === 'pdf' ? 'pdf' : 
                           (fileExt === 'doc' || fileExt === 'docx' ? 'word' : 
                           (fileExt === 'ppt' || fileExt === 'pptx' ? 'ppt' : 'document'))
             }));
@@ -647,7 +648,7 @@ export default function KnowledgeBase() {
                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">点击或拖拽文件进行神经映射</p>
                            <p className="text-[8px] text-gray-300 uppercase mt-1">支持常见文本、表格与演示格式 (PDF, TXT, DOCX, XLSX, PPTX)</p>
                         </div>
-                        <input type="file" className="hidden" onChange={handleFileUpload} accept=".txt, .pdf, .docx, .xlsx, .xls, .ppt, .pptx" />
+                        <input type="file" className="hidden" onChange={handleFileUpload} accept=".txt, .md, .pdf, .docx, .xlsx, .xls, .ppt, .pptx" />
                      </label>
                   </div>
 

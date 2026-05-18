@@ -44,6 +44,7 @@ export default function JourneyGenerator() {
 
   const [journeyHistory, setJourneyHistory] = useState<JourneyLog[]>([]);
   const [isViewingHistory, setIsViewingHistory] = useState(false);
+  const [knowledge, setKnowledge] = useState<any[]>([]);
   
   const [insight, setInsight] = useState<any>(null);
   const [customerMessage, setCustomerMessage] = useState('我们也在关注这个方向');
@@ -60,11 +61,13 @@ export default function JourneyGenerator() {
     try {
       const productsData = await localDb.getAll('products');
       const historyData = await localDb.getAll('journeyLogs');
+      const knowledgeData = await localDb.getAll('knowledge');
       
       setProducts(productsData);
       setJourneyHistory(historyData.sort((a: any, b: any) => 
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       ));
+      setKnowledge(knowledgeData);
 
       if (productsData.length > 0 && !selectedProductId) {
         setSelectedProductId(productsData[0].id);
@@ -91,7 +94,7 @@ export default function JourneyGenerator() {
         createdAt: new Date().toISOString()
       };
       await localDb.add('products', product);
-      setProducts([...products, product]);
+      setProducts(prev => [...prev, product]);
       setSelectedProductId(product.id);
       setIsAddingProduct(false);
       setNewProduct({ name: '', industry: '', coreValue: '', targetUser: '', usageScenario: '' });
@@ -105,11 +108,13 @@ export default function JourneyGenerator() {
     if (!confirm('确定要删除该产品吗？相关生成的旅途记录将保留但失去关联。')) return;
     try {
       await localDb.delete('products', id);
-      const updated = products.filter(p => p.id !== id);
-      setProducts(updated);
-      if (selectedProductId === id) {
-        setSelectedProductId(updated.length > 0 ? updated[0].id : '');
-      }
+      setProducts(prev => {
+        const updated = prev.filter(p => p.id !== id);
+        if (selectedProductId === id) {
+          setSelectedProductId(updated.length > 0 ? updated[0].id : '');
+        }
+        return updated;
+      });
     } catch (err) {
       console.error(err);
     }
@@ -126,7 +131,12 @@ export default function JourneyGenerator() {
         targetUser: activeProduct.targetUser,
         usageScenario: activeProduct.usageScenario
       };
-      const result = await generateIntegratedStrategicInsight(productInfo, customerMessage);
+
+      const knowledgeContext = knowledge.length > 0 
+        ? knowledge.map(k => `【${k.title}】: ${k.content}`).join('\n')
+        : "";
+
+      const result = await generateIntegratedStrategicInsight(productInfo, customerMessage, knowledgeContext);
       const sanitized = JSON.parse(JSON.stringify(result));
       setInsight(sanitized);
 
@@ -142,7 +152,7 @@ export default function JourneyGenerator() {
         timestamp: new Date().toISOString()
       };
       await localDb.add('journeyLogs', logEntry);
-      setJourneyHistory([logEntry, ...journeyHistory]);
+      setJourneyHistory(prev => [logEntry, ...prev]);
     } catch (err) {
       console.error("[JourneyGenerator] synthesize error:", err);
     } finally {

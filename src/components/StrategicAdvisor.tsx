@@ -66,6 +66,24 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   const [queryText, setQueryText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTimestamp, setErrorTimestamp] = useState<number>(0);
+  const [errorCountdown, setErrorCountdown] = useState(0);
+
+  useEffect(() => {
+    if (error) {
+       setErrorCountdown(5);
+       const timer = setInterval(() => {
+          setErrorCountdown(prev => {
+             if (prev <= 1) {
+                clearInterval(timer);
+                return 0;
+             }
+             return prev - 1;
+          });
+       }, 1000);
+       return () => clearInterval(timer);
+    }
+  }, [error, errorTimestamp]);
   const [reasoningResult, setReasoningResult] = useState<any>(null);
   const [pendingAction, setPendingAction] = useState<any>(null);
   const [executingAction, setExecutingAction] = useState(false);
@@ -115,7 +133,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
       ));
       setLlmConfigs(configsData);
       setInteractionHistory(historyData.sort((a: any, b: any) => 
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        new Date(b.timestamp || b.createdAt || 0).getTime() - new Date(a.timestamp || a.createdAt || 0).getTime()
       ));
     } catch (error) {
       console.error("[StrategicAdvisor] fetchData error:", error);
@@ -175,7 +193,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         ownerId: user?.uid || 'local-user'
       } as any; 
       await localDb.add('llm_configs', config);
-      setLlmConfigs([...llmConfigs, config]);
+      setLlmConfigs(prev => [...prev, config]);
       setIsAddingLLM(false);
       setNewLLM({
         displayName: '',
@@ -194,7 +212,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
   const deleteLLM = async (id: string) => {
     try {
       await localDb.delete('llm_configs', id);
-      setLlmConfigs(llmConfigs.filter(c => c.id !== id));
+      setLlmConfigs(prev => prev.filter(c => c.id !== id));
     } catch (error) {
       console.error("[StrategicAdvisor] deleteLLM error:", error);
       setError("删除模型配置失败");
@@ -205,7 +223,7 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     if (!editingHistoryName.trim()) return;
     try {
       await localDb.update('agent_logs', id, { query: editingHistoryName });
-      setInteractionHistory(interactionHistory.map(item => 
+      setInteractionHistory(prevHistory => prevHistory.map(item => 
         item.id === id ? { ...item, query: editingHistoryName } : item
       ));
       setEditingHistoryId(null);
@@ -227,12 +245,14 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
     try {
       const result = await performStrategicAgentReasoning(
         queryText,
-        { clients, knowledge, skills }
+        { clients, knowledge, skills },
+        interactionHistory.slice(0, 5).reverse() // Pass last 5 interactions as history
       );
       
       let dehydratedResult: any = null;
       if (result?.error) {
         setError(result.message || 'AI 推理暂时不可用');
+        setErrorTimestamp(Date.now());
         dehydratedResult = {
           decision: '推理受阻',
           analysis: result.message || '由于模型响应异常，Agent 无法完成该指令的推理。建议检查模型 API 配置。',
@@ -259,10 +279,13 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
         ownerId: localAuth.getCurrentUser()?.uid || 'local-user'
       };
       const savedEntry = await localDb.add('agent_logs', historyEntry); 
-      if (savedEntry) setInteractionHistory([savedEntry as AgentInteraction, ...interactionHistory]);
+      if (savedEntry) {
+        setInteractionHistory(prev => [savedEntry as AgentInteraction, ...prev]);
+      }
     } catch (error: any) {
       console.error("Reasoning failed:", error);
       setError(error.message || 'AI 推理引擎发生严重错误');
+      setErrorTimestamp(Date.now());
     } finally {
       setLoading(false);
     }
@@ -540,15 +563,27 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                             <motion.div 
                               initial={{ opacity: 0, y: -20 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-start gap-4"
+                              className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-start gap-4 animate-in fade-in slide-in-from-top-2"
                             >
-                               <AlertCircle className="w-5 h-5 text-red-500 mt-1 shrink-0" />
-                               <div className="flex-1">
-                                  <div className="text-sm font-bold text-red-500 mb-1">推理引擎异常</div>
-                                  <div className="text-xs text-red-400/80 leading-relaxed font-mono break-all">{error}</div>
+                               <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                                 <AlertCircle className="w-6 h-6 text-red-500" />
                                </div>
-                               <button onClick={() => setError(null)} className="text-red-500 p-1 hover:bg-red-500/10 rounded-lg">
-                                  <XCircle className="w-4 h-4" />
+                               <div className="flex-1">
+                                  <div className="text-sm font-black text-red-500 mb-1 uppercase tracking-widest">推理引擎受阻 (Countdown: {errorCountdown}s)</div>
+                                  <div className="text-xs text-red-400/80 leading-relaxed font-mono break-all mb-2">{error}</div>
+                                  <div className="text-[10px] text-red-500/50 uppercase font-bold">
+                                    {errorCountdown > 0 ? `认知层正在自愈，请在倒计时结束后重试` : '自愈完成，现场已锁定，您可以关闭此窗口并重试'}
+                                  </div>
+                               </div>
+                               <button 
+                                 onClick={() => {
+                                   if (errorCountdown > 0) return;
+                                   setError(null);
+                                 }}
+                                 disabled={errorCountdown > 0}
+                                 className={`p-2 transition-all ${errorCountdown > 0 ? 'text-gray-600 opacity-50' : 'text-red-500 hover:scale-110 hover:bg-red-500/10 rounded-xl'}`}
+                               >
+                                  <XCircle className="w-5 h-5" />
                                </button>
                             </motion.div>
                          )}
@@ -716,7 +751,9 @@ export default function StrategicAdvisor({ setCurrentView, setSelectedClientId, 
                                     ownerId: user?.uid || 'local-user'
                                   };
                                   const savedEntry = await localDb.add('agent_logs', historyEntry); 
-                                  if (savedEntry) setInteractionHistory([savedEntry as AgentInteraction, ...interactionHistory]);
+                                  if (savedEntry) {
+                                    setInteractionHistory(prev => [savedEntry as AgentInteraction, ...prev]);
+                                  }
                                } catch (err) { 
                                   console.error(err); 
                                   setLabResult("资产生成失败，请检查网络或模型配置。");

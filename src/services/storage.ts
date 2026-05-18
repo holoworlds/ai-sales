@@ -7,10 +7,37 @@ export const localDb = {
     try {
       const res = await fetch(`/api/db/${collectionName}`);
       if (!res.ok) throw new Error(`Fetch failed: ${res.statusText}`);
-      return await res.json();
+      const serverData = await res.json();
+      
+      // MIGRATION: If server is empty but localStorage has data, sync to server
+      if (Array.isArray(serverData) && serverData.length === 0) {
+        const localDataRaw = localStorage.getItem(`nexus_${collectionName}`);
+        if (localDataRaw) {
+          try {
+            const localData = JSON.parse(localDataRaw);
+            if (Array.isArray(localData) && localData.length > 0) {
+              console.log(`[Migration] Detected ${localData.length} items for ${collectionName} in localStorage. Syncing...`);
+              // Sync sequentially to avoid server-side pressure even with locks
+              for (const item of localData) {
+                await localDb.add(collectionName, item).catch(e => {
+                  console.warn(`[Migration] Failed to sync item to ${collectionName}:`, e);
+                });
+              }
+              console.log(`[Migration] Completed sync for ${collectionName}`);
+              return localData;
+            }
+          } catch (parseErr) {
+            console.error(`[Migration] Failed to parse local data for ${collectionName}:`, parseErr);
+          }
+        }
+      }
+      
+      return serverData;
     } catch (err) {
       console.error(`Error getting all from ${collectionName}:`, err);
-      return [];
+      // Fallback to localStorage if server fails
+      const localDataRaw = localStorage.getItem(`nexus_${collectionName}`);
+      return localDataRaw ? JSON.parse(localDataRaw) : [];
     }
   },
 
@@ -31,11 +58,13 @@ export const localDb = {
   add: async (collectionName: string, data: any) => {
     try {
       const id = data.id || uuidv4();
+      const now = new Date().toISOString();
       const newDoc = {
         ...data,
         id,
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        timestamp: data.timestamp || now,
+        createdAt: data.createdAt || now,
+        updatedAt: now
       };
       
       const res = await fetch(`/api/db/${collectionName}`, {
@@ -99,9 +128,7 @@ export const localAuth = {
   },
   
   getCurrentUser: () => {
-    // Note: This matches the persistent server state
-    // For synchronous access, we might still need a simple state wrapper
-    return null; // Should be handled by loading the async version on init
+    return null; // Handled by loading the async version on init in components
   },
   
   login: async () => {

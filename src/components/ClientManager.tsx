@@ -44,13 +44,13 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
 
   // Handle initial client selection from dashboard
   useEffect(() => {
-    if (initialClientId && clients.length > 0) {
+    if (initialClientId && selectedClient?.id !== initialClientId) {
       const client = clients.find(c => c.id === initialClientId);
       if (client) {
         setSelectedClient(client);
       }
     }
-  }, [initialClientId, clients]);
+  }, [initialClientId, clients, selectedClient?.id]);
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [newClient, setNewClient] = useState({ name: '', company: '', industry: '' });
@@ -91,10 +91,12 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
 
   const toggleExpandAction = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const newSet = new Set(expandedActionIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setExpandedActionIds(newSet);
+    setExpandedActionIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      return newSet;
+    });
   };
 
   const fetchData = async () => {
@@ -258,16 +260,22 @@ export default function ClientManager({ initialClientId, onClientClear }: Client
         authorId: user?.uid
       });
 
-      const result = JSON.parse(JSON.stringify(await analyzeClientStage(logContent)));
+      const rawRes = await analyzeClientStage(logContent);
+      const result = JSON.parse(JSON.stringify(rawRes));
+
+      if (result.error) {
+        throw new Error(result.message || '快速分析失败');
+      }
+
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + (result.recommendedFollowupDays || 7));
 
       await localDb.update('clients', quickLogClient.id, {
-        stage: result.stage,
-        decisionMatrix: result.matrix,
-        nextActionSuggestion: result.nextActionSuggestion,
+        stage: result.stage || quickLogClient.stage,
+        decisionMatrix: result.matrix || quickLogClient.decisionMatrix,
+        nextActionSuggestion: result.nextActionSuggestion || quickLogClient.nextActionSuggestion,
         nextActionDate: nextDate,
-        projectScore: result.scoreDetails?.total || quickLogClient.projectScore,
+        projectScore: result.scoreDetails?.total ?? quickLogClient.projectScore,
         promoter: result.extractedFields?.promoter || quickLogClient.promoter,
         promoterDept: result.extractedFields?.promoterDept || quickLogClient.promoterDept,
         keyPerson: result.extractedFields?.keyPerson || quickLogClient.keyPerson,

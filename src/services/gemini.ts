@@ -4,15 +4,20 @@ import { callLLM, getActiveModel as getActiveModelId, sanitizeAIContent } from "
 
 export const getActiveModel = getActiveModelId;
 
-export const generateMarketingReply = async (conversation: string, clientContext: string) => {
+export const generateMarketingReply = async (currentMessage: string, historyAndContext: string) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
-      Based on the following conversation and client context, generate a high-quality response to advance the B2B partnership.
+      ${evoContext}
+      你是大客户销售战术助手。基于以下背景和对话历史，针对当前用户输入生成一个高价值的建议或回复话术。
       
-      Client Context: ${clientContext}
-      Conversation History: ${conversation}
+      【项目背景与历史互动】：
+      ${historyAndContext}
+
+      【当前用户输入/消息】：
+      ${currentMessage}
       
-      The response should be professional, insightful, and focused on solving the client's "pain points" or "bottlenecks" (卡点).
+      回复应具备：专业性、洞察力，并精准击中客户当前的“痛点”或“决策卡点”。
     `;
 
     return await callLLM(prompt);
@@ -24,7 +29,9 @@ export const generateMarketingReply = async (conversation: string, clientContext
 
 export const generateContentAsset = async (type: string, clientInfo: string, requirements: string) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       Generate a B2B marketing ${type} based on the following client information and requirements.
       
       Client Info: ${clientInfo}
@@ -41,6 +48,10 @@ export const generateContentAsset = async (type: string, clientInfo: string, req
 };
 
 const safeJsonParse = (text: string) => {
+  if (!text || text.trim() === '') {
+    console.warn('[Gemini Service] Attempted to parse empty text as JSON');
+    return { error: true, message: 'AI 返回内容为空，请重试' };
+  }
   try {
     // Attempt to clean markdown json blocks if present
     let cleaned = text.trim();
@@ -55,8 +66,8 @@ const safeJsonParse = (text: string) => {
     const parsed = JSON.parse(cleaned);
     // [CRITICAL FIX] SES-Proofing: Dehydrate the object to strip any non-standard properties/proxies
     return JSON.parse(JSON.stringify(parsed));
-  } catch (e) {
-    console.error('[Gemini Service] JSON Parse Error:', e, 'Raw text:', text);
+  } catch (e: any) {
+    console.error('[Gemini Service] JSON Parse Error:', e.message || e, 'Raw text:', text);
     // Try a more aggressive extraction
     try {
       const firstBrace = text.indexOf('{');
@@ -66,8 +77,8 @@ const safeJsonParse = (text: string) => {
         const parsed = JSON.parse(extracted.replace(/[\u0000-\u001F\u007F-\u009F]/g, ""));
         return JSON.parse(JSON.stringify(parsed));
       }
-    } catch (e2) {
-      console.error('[Gemini Service] Aggressive Parse Error:', e2);
+    } catch (e2: any) {
+      console.error('[Gemini Service] Aggressive Parse Error:', e2.message || e2);
     }
     return { error: true, message: '数据解析失败' };
   }
@@ -167,15 +178,25 @@ export const analyzeClientStage = async (interactions: string) => {
   }
 };
 
-export const consultClientStrategy = async (discussion: string, clientContext: string) => {
+export const consultClientStrategy = async (discussion: string, clientContext: string, knowledgeContext?: string, history: any[] = []) => {
   try {
+    const evoContext = await getEvolutionContext();
+    const historyContext = history.length > 0 
+      ? `\n【对话历史回忆】：\n${history.map(h => `${h.role === 'user' ? '用户' : '你'}: ${h.content}`).join('\n')}\n`
+      : "";
+
     const prompt = `
+      ${evoContext}
       你是一个顶级的B2B销售教练（Sales Coach）。用户正在向你咨询关于某个具体客户的策略。
       
+      【参考知识库深度建议】：
+      ${knowledgeContext || "暂无相关外部知识参考"}
+
       客户背景与历史互动：
       ${clientContext}
+      ${historyContext}
       
-      用户的咨询/讨论内容：
+      用户的当前咨询/讨论内容：
       ${discussion}
       
       返回 JSON 结构：
@@ -198,11 +219,18 @@ export const consultClientStrategy = async (discussion: string, clientContext: s
 
 export const generateIntegratedStrategicInsight = async (
   product: any,
-  customerMessage: string
+  customerMessage: string,
+  knowledgeContext?: string
 ) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       你是一个顶级的 B2B 战略专家。分析产品信息和客户发言，并生成客户旅程。
+      
+      【参考知识库】：
+      ${knowledgeContext || "暂无相关外部知识参考"}
+
       产品：${JSON.stringify(product)}
       发言：${customerMessage}
       
@@ -223,7 +251,9 @@ export const generateIntegratedStrategicInsight = async (
 
 export const getStrategicAdvice = async (query: string, context: any) => {
   try {
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       你是一个顶级战略副总裁和销售教练。
       客户状态：${JSON.stringify(context.clients)}
       知识库：${JSON.stringify(context.knowledge)}
@@ -265,12 +295,38 @@ export const extractKnowledgeInsights = async (content: string) => {
   }
 };
 
-export const performStrategicAgentReasoning = async (queryText: string, context: any) => {
+export const performStrategicAgentReasoning = async (queryText: string, context: any, history: any[] = []) => {
   try {
     const evoContext = await getEvolutionContext();
+    const historyContext = history.length > 0 
+      ? `\n【对话历史回忆 (仅核心结论)】：\n${history.flatMap(h => [
+          `用户: ${h.query}`,
+          `Agent: ${h.result?.decision || ''} (Action: ${h.result?.recommendedAction || 'None'})`
+        ]).filter(Boolean).join('\n')}\n`
+      : "";
+
     const prompt = `${evoContext}
-    你是一个复合型 Agent 系统。指令：${queryText}。上下文：${JSON.stringify(context)}
-    返回 JSON：{ "analysis": "分析", "decision": "决策", "recommendedAction": "建议", "generatedMessage": "消息", "usedSkills": [], "confidence": 0.9, "suggestedSystemAction": { "type": "UPDATE_CLIENT", "data": {}, "reasoning": "理由" } }`;
+    你是一个复合型 Agent 系统，拥有对 B2B 销售全生命周期的深度认知。
+    
+    ${historyContext}
+    
+    当前指令/追问：${queryText}。
+    数据上下文（包含客户、知识与技能库）：${JSON.stringify(context)}
+    
+    返回 JSON 结构：
+    { 
+      "analysis": "深度意图与现状分析", 
+      "decision": "核心决策结论", 
+      "recommendedAction": "建议执行的下一步", 
+      "generatedMessage": "建议直接回复客户/团队的消息内容", 
+      "usedSkills": ["命中的能力1", "能力2"], 
+      "confidence": 0.9, 
+      "suggestedSystemAction": { 
+        "type": "UPDATE_CLIENT" | "CREATE_CLIENT" | "CREATE_KNOWLEDGE" | null, 
+        "data": {}, 
+        "reasoning": "建议执行该操作的理由" 
+      } 
+    }`;
 
     const response = await callLLM(prompt, { json: true });
     return typeof response === 'string' ? safeJsonParse(response) : response;
@@ -421,7 +477,9 @@ export const generateRealtimeInputSuggestion = async (inputText: string, clientC
   try {
     if (!inputText || inputText.length < 5) return null;
     
+    const evoContext = await getEvolutionContext();
     const prompt = `
+      ${evoContext}
       你是一个资深的 CRM 战略助手。用户正在输入一段关于客户 "${clientContext?.name || '未知'}" 的沟通记录或咨询。
       
       【输入内容】：

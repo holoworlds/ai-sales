@@ -52,6 +52,12 @@ export interface Client {
     riskSignal: string;
     nextTarget: string;
   };
+  manualScoreDetails?: {
+    strategicValue?: boolean;
+    feasibility?: boolean;
+    progress?: boolean;
+  };
+  isStageManual?: boolean;
   ownerId: string;
   createdAt: any;
   updatedAt: any;
@@ -103,7 +109,7 @@ export interface KnowledgeEntry {
   id: string;
   title: string;
   content: string;
-  sourceType: 'document' | 'feedback' | 'market_report' | 'word' | 'ppt' | 'excel' | 'pdf';
+  sourceType: 'document' | 'feedback' | 'market_report' | 'word' | 'ppt' | 'excel' | 'pdf' | 'markdown';
   tags: string[];
   ownerId: string;
   category: 'strategy' | 'competitor' | 'industry' | 'product' | 'customer_case';

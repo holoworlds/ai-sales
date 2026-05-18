@@ -1,5 +1,5 @@
-import { useState, useEffect, Component, ReactNode } from 'react';
-import { localAuth } from './services/storage';
+import { useState, useEffect, useCallback, useMemo, Component, ReactNode } from 'react';
+import { localDb, localAuth } from './services/storage';
 import { AppLogger } from './services/logger';
 import { ErrorLog } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -16,11 +16,17 @@ import {
   Search,
   Bell,
   Cpu,
-  History
+  History,
+  Database,
+  RefreshCw,
+  HardDriveDownload,
+  CheckCircle2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import Dashboard from './components/Dashboard';
 import StrategicAdvisor from './components/StrategicAdvisor';
+import StrategicAdvisorErrorBoundary from './components/StrategicAdvisorErrorBoundary';
+import NexusErrorBoundary from './components/NexusErrorBoundary';
 import ClientManager from './components/ClientManager';
 import KnowledgeBase from './components/KnowledgeBase';
 import JourneyGenerator from './components/JourneyGenerator';
@@ -61,6 +67,104 @@ class LocalErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
   }
 }
 
+function RecoveryOverlay() {
+  const [localDatasets, setLocalDatasets] = useState<{key: string, count: number}[]>([]);
+  const [recovering, setRecovering] = useState(false);
+  const [complete, setComplete] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    // Check if we have data in localStorage that we might want to recover
+    const datasets = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('nexus_')) {
+        try {
+          const data = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(data) && data.length > 0) {
+            datasets.push({ key: key.replace('nexus_', ''), count: data.length });
+          }
+        } catch {}
+      }
+    }
+    if (datasets.length > 0) {
+      setLocalDatasets(datasets);
+      // Only show if we suspect data loss (e.g. server is empty - check a probe)
+      localDb.getAll('clients').then(clients => {
+        if (clients.length === 0) setVisible(true);
+      });
+    }
+  }, []);
+
+  const handleRecover = async () => {
+    setRecovering(true);
+    try {
+      for (const dataset of localDatasets) {
+        const raw = localStorage.getItem(`nexus_${dataset.key}`);
+        if (raw) {
+          const items = JSON.parse(raw);
+          for (const item of items) {
+             await localDb.add(dataset.key as any, item).catch(() => {});
+          }
+        }
+      }
+      setComplete(true);
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    } catch (err) {
+      console.error("Recovery failed", err);
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed bottom-8 right-8 z-[200] max-w-sm w-full">
+      <motion.div 
+        initial={{ y: 50, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="bg-white border-2 border-blue-500 rounded-3xl p-6 shadow-2xl shadow-blue-500/20"
+      >
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white">
+            <Database className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-black text-gray-900 uppercase tracking-tighter">发现可恢复的本地数据</h3>
+            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{localDatasets.length} 个本地记忆切片待同步</p>
+          </div>
+          <button onClick={() => setVisible(false)} className="ml-auto text-gray-400 hover:text-gray-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2 mb-6 max-h-32 overflow-y-auto no-scrollbar">
+          {localDatasets.map(d => (
+            <div key={d.key} className="flex justify-between items-center text-[10px] font-bold text-gray-600 bg-gray-50 p-2 rounded-xl">
+              <span className="uppercase">{d.key}</span>
+              <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{d.count} 条</span>
+            </div>
+          ))}
+        </div>
+
+        <button 
+          onClick={handleRecover}
+          disabled={recovering || complete}
+          className={`w-full py-4 rounded-xl flex items-center justify-center gap-3 transition-all font-black text-xs uppercase tracking-widest ${
+            complete ? 'bg-emerald-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+          }`}
+        >
+          {recovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : (complete ? <CheckCircle2 className="w-4 h-4" /> : <HardDriveDownload className="w-4 h-4" />)}
+          {recovering ? '正在同步数据...' : (complete ? '同步成功，正在刷新' : '立即恢复数据至系统')}
+        </button>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -74,8 +178,25 @@ export default function App() {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [persistentLogs, setPersistentLogs] = useState<ErrorLog[]>([]);
+  const [crashLogs, setCrashLogs] = useState<any[]>([]);
 
   useRenderTrace('App', { currentView, selectedClientId, user: !!user });
+
+  const navigateToView = useCallback((view: View) => {
+    setCurrentView(view);
+  }, []);
+
+  const handleClientClear = useCallback(() => {
+    setSelectedClientId(null);
+  }, []);
+
+  const navItems = useMemo(() => [
+    { id: 'dashboard', label: '控制中心', icon: LayoutDashboard },
+    { id: 'agent', label: '认知演进', icon: Cpu },
+    { id: 'clients', label: '客户资产', icon: Users },
+    { id: 'journey', label: '认知旅程', icon: Sparkles },
+    { id: 'knowledge', label: '智能知识库', icon: BookOpen },
+  ], []);
 
   useEffect(() => {
     AppLogger.updateContext(undefined, currentView, { user: user?.uid });
@@ -87,9 +208,16 @@ export default function App() {
 
   useEffect(() => {
     if (showDebugPanel) {
-      AppLogger.getLogs().then(logs => {
-        setPersistentLogs(logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-      });
+      AppLogger.getLogs()
+        .then(logs => {
+          setPersistentLogs(logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+        })
+        .catch(err => {
+          console.error("Failed to fetch logs:", err);
+        });
+      
+      const cl = AppLogger.getCrashLogs();
+      setCrashLogs(cl.sort((a: any, b: any) => b.timestamp - a.timestamp));
     }
   }, [showDebugPanel]);
 
@@ -102,36 +230,8 @@ export default function App() {
   }, [selectedClientId]);
 
   useEffect(() => {
-    const handleError = (error: ErrorEvent) => {
-      // Ignore some non-critical SES warnings or known benign errors
-      if (error.message?.includes('SES Removing unpermitted intrinsics')) {
-        return;
-      }
-      
-      AppLogger.logError(error.error || new Error(error.message), {
-        message: error.message,
-        browserInfo: {
-          userAgent: navigator.userAgent,
-          language: navigator.language,
-          platform: navigator.platform
-        }
-      });
-    };
-
-    const handlePromiseRejection = (event: PromiseRejectionEvent) => {
-      console.error('Unhandled Promise Rejection:', event.reason);
-      AppLogger.trackPromiseReject(event.reason);
-      const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-      AppLogger.logError(error);
-    };
-
-    window.addEventListener('error', handleError);
-    window.addEventListener('unhandledrejection', handlePromiseRejection);
-
-    return () => {
-      window.removeEventListener('error', handleError);
-      window.removeEventListener('unhandledrejection', handlePromiseRejection);
-    };
+    // Only keep non-global tracking here if needed, 
+    // AppLogger now handles window error/rejection globally.
   }, []);
 
   useEffect(() => {
@@ -241,14 +341,6 @@ export default function App() {
     );
   }
 
-  const navItems = [
-    { id: 'dashboard', label: '控制中心', icon: LayoutDashboard },
-    { id: 'agent', label: '认知演进', icon: Cpu },
-    { id: 'clients', label: '客户资产', icon: Users },
-    { id: 'journey', label: '认知旅程', icon: Sparkles },
-    { id: 'knowledge', label: '智能知识库', icon: BookOpen },
-  ];
-
   // Main Content
   return (
     <ErrorBoundary>
@@ -275,7 +367,7 @@ export default function App() {
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setCurrentView(item.id as View)}
+              onClick={() => navigateToView(item.id as View)}
               className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all ${
                 currentView === item.id 
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' 
@@ -359,20 +451,33 @@ export default function App() {
               />
             )}
             {currentView === 'agent' && (
-              <StrategicAdvisor 
-                setCurrentView={setCurrentView} 
-                setSelectedClientId={setSelectedClientId} 
-              />
+              <StrategicAdvisorErrorBoundary>
+                <StrategicAdvisor 
+                  setCurrentView={setCurrentView} 
+                  setSelectedClientId={setSelectedClientId} 
+                />
+              </StrategicAdvisorErrorBoundary>
             )}
             {currentView === 'clients' && (
-              <ClientManager 
-                initialClientId={selectedClientId} 
-                onClientClear={() => setSelectedClientId(null)} 
-              />
+              <NexusErrorBoundary title="CRM与客户管理模块异常">
+                <ClientManager 
+                  initialClientId={selectedClientId} 
+                  onClientClear={handleClientClear} 
+                />
+              </NexusErrorBoundary>
             )}
-            {currentView === 'knowledge' && <KnowledgeBase />}
-            {currentView === 'journey' && <JourneyGenerator />}
+            {currentView === 'knowledge' && (
+              <NexusErrorBoundary title="智能知识库模块异常">
+                <KnowledgeBase />
+              </NexusErrorBoundary>
+            )}
+            {currentView === 'journey' && (
+              <NexusErrorBoundary title="认知旅程合成器异常">
+                <JourneyGenerator />
+              </NexusErrorBoundary>
+            )}
           </motion.div>
+          <RecoveryOverlay />
         </div>
 
         {/* Debug Panel Toggle */}
@@ -411,51 +516,77 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-4 font-mono text-[11px] space-y-4 no-scrollbar">
-                {persistentLogs.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-gray-600 opacity-20 italic">
-                    暂无持久化错误记录
-                  </div>
-                ) : (
-                  persistentLogs.map((log) => (
-                    <div key={log.id} className="p-4 rounded-xl border border-white/5 bg-white/5 space-y-3">
-                      <div className="flex justify-between items-start opacity-50 text-[9px] font-black uppercase tracking-widest">
-                        <span className="text-red-400 font-bold">{new Date(log.timestamp).toLocaleString()}</span>
-                        <span>View: {log.view || 'N/A'}</span>
-                      </div>
-                      <div className="text-gray-100 font-bold text-xs">{log.message}</div>
-                      
-                      {log.lastClickEvent && (
-                        <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20 text-blue-300 text-[10px]">
-                           Last Click: [{log.lastClickEvent.tag}] {log.lastClickEvent.text}
+              <div className="flex-1 overflow-auto p-4 font-mono text-[11px] space-y-6 no-scrollbar">
+                {/* Crash Logs (High Reliability) */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] uppercase font-black text-rose-500 tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+                    Crash Logs (LocalStorage)
+                  </h4>
+                  {crashLogs.length === 0 ? (
+                    <div className="p-4 rounded-xl border border-white/5 bg-white/5 text-gray-700 italic">No persistent crashes detected</div>
+                  ) : (
+                    crashLogs.map((log, idx) => (
+                      <div key={idx} className="p-4 rounded-xl border border-rose-500/20 bg-rose-500/5 space-y-2">
+                        <div className="flex justify-between items-center opacity-50 text-[9px]">
+                          <span className="text-rose-400 font-bold">{new Date(log.timestamp || Date.now()).toLocaleString()}</span>
+                          <span className="bg-rose-500/20 px-2 py-0.5 rounded uppercase">{log.level}</span>
                         </div>
-                      )}
-
-                      {log.stack && (
-                        <details className="cursor-pointer group">
-                          <summary className="text-gray-500 hover:text-gray-300 transition-colors">View Stack Trace</summary>
-                          <pre className="mt-2 text-red-400/60 overflow-x-auto p-3 bg-black/40 rounded-lg text-[9px]">
-                            {log.stack}
+                        <div className="text-gray-100 font-bold text-xs">{log.message}</div>
+                        <div className="text-[9px] text-gray-500 border-t border-white/5 pt-2 flex flex-wrap gap-x-4">
+                          <span>View: {log.view}</span>
+                          <span>URL: {log.url?.substring(0, 40)}...</span>
+                        </div>
+                        {log.extra?.stack && (
+                          <pre className="mt-2 text-rose-300/40 overflow-x-auto p-2 bg-black/40 rounded text-[8px] leading-tight">
+                            {log.extra.stack.substring(0, 500)}...
                           </pre>
-                        </details>
-                      )}
-
-                      {log.componentStack && (
-                         <details className="cursor-pointer group">
-                           <summary className="text-gray-500 hover:text-gray-300 transition-colors">View Component Stack</summary>
-                           <pre className="mt-2 text-indigo-400/60 overflow-x-auto p-3 bg-black/40 rounded-lg text-[9px]">
-                             {log.componentStack}
-                           </pre>
-                         </details>
-                      )}
-
-                      <div className="flex gap-4 opacity-40 text-[8px] uppercase tracking-tighter">
-                        <span>UA: {log.browserInfo.userAgent.substring(0, 30)}...</span>
-                        <span>State Object: {log.state ? 'YES' : 'NO'}</span>
+                        )}
                       </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
+
+                <div className="h-px bg-gray-800" />
+
+                {/* Database Logs */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] uppercase font-black text-blue-500 tracking-widest">
+                    Standard Logs (IndexedDB)
+                  </h4>
+                  {persistentLogs.length === 0 ? (
+                    <div className="p-4 rounded-xl border border-white/5 bg-white/5 text-gray-700 italic">No logs found</div>
+                  ) : (
+                    persistentLogs.map((log) => (
+                      <div key={log.id} className="p-4 rounded-xl border border-white/5 bg-white/5 space-y-3">
+                        <div className="flex justify-between items-start opacity-50 text-[9px] font-black uppercase tracking-widest">
+                          <span className="text-red-400 font-bold">{new Date(log.timestamp).toLocaleString()}</span>
+                          <span>View: {log.view || 'N/A'}</span>
+                        </div>
+                        <div className="text-gray-100 font-bold text-xs">{log.message}</div>
+                        
+                        {log.lastClickEvent && (
+                          <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20 text-blue-300 text-[10px]">
+                             Last Click: [{log.lastClickEvent.tag}] {log.lastClickEvent.text}
+                          </div>
+                        )}
+
+                        {log.stack && (
+                          <details className="cursor-pointer group">
+                            <summary className="text-gray-500 hover:text-gray-300 transition-colors">View Stack Trace</summary>
+                            <pre className="mt-2 text-red-400/60 overflow-x-auto p-3 bg-black/40 rounded-lg text-[9px]">
+                              {log.stack}
+                            </pre>
+                          </details>
+                        )}
+
+                        <div className="flex gap-4 opacity-40 text-[8px] uppercase tracking-tighter">
+                          <span>UA: {log.browserInfo.userAgent.substring(0, 30)}...</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
